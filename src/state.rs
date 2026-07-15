@@ -51,6 +51,7 @@ impl GrinderState {
             losses: 0,
             panic_exits: 0,
             realized_pnl: 0.0,
+            halted: false,
         }
     }
 }
