@@ -37,6 +37,9 @@ struct Position {
     entry_price: f64,
     cash_left: f64,   // reliquat du stack non déployé (profondeur insuffisante)
     z_at_entry: f64,
+    spot_at_entry: f64,
+    sigma_at_entry: f64,
+    remaining_s_at_entry: i64,
     window_ts: i64,
     slug: String,
     strike: f64,
@@ -249,6 +252,9 @@ impl Grinder {
                 entry_price: fill.avg_price,
                 cash_left,
                 z_at_entry: z,
+                spot_at_entry: gs.spot,
+                sigma_at_entry: gs.sigma,
+                remaining_s_at_entry: remaining,
                 window_ts: market.window_ts,
                 slug: market.slug.clone(),
                 strike,
@@ -387,6 +393,10 @@ impl Grinder {
             z_at_entry: pos.z_at_entry,
             z_at_exit: z_exit,
             drift_at_exit: gs.drift,
+            spot_at_entry: pos.spot_at_entry,
+            dist_at_entry: (pos.spot_at_entry - pos.strike).abs(),
+            sigma_at_entry: pos.sigma_at_entry,
+            remaining_s_at_entry: pos.remaining_s_at_entry,
         };
         if let Err(e) = state::append_window(&self.cfg.windows_path, &rec) {
             tracing::error!(error = %e, "écriture grand livre échouée");

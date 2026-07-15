@@ -74,6 +74,17 @@ pub struct WindowRecord {
     pub z_at_entry: f64,
     pub z_at_exit: f64,
     pub drift_at_exit: f64,
+    // Instrumentation distance au strike (étude régimes nuit/jour) — défauts 0
+    // pour relire les lignes antérieures au 15 juil.
+    #[serde(default)]
+    pub spot_at_entry: f64,
+    /// |spot − strike| en $ au moment de l'entrée.
+    #[serde(default)]
+    pub dist_at_entry: f64,
+    #[serde(default)]
+    pub sigma_at_entry: f64,
+    #[serde(default)]
+    pub remaining_s_at_entry: i64,
 }
 
 /// Charge l'état, ou en crée un neuf si le fichier n'existe pas.
@@ -169,6 +180,10 @@ mod tests {
             z_at_entry: 2.1,
             z_at_exit: 3.0,
             drift_at_exit: 1.2e-5,
+            spot_at_entry: 60050.0,
+            dist_at_entry: 50.0,
+            sigma_at_entry: 0.42,
+            remaining_s_at_entry: 120,
         };
         append_window(&wp, &rec).unwrap();
         append_window(&wp, &rec).unwrap();
