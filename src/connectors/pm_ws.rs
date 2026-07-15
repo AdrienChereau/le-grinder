@@ -64,7 +64,11 @@ pub fn spawn(state: PmWsShared) -> watch::Sender<Vec<String>> {
                 }
             };
             match run_session(&state, &tokens, &mut rx).await {
-                Ok(()) => tracing::info!("pm_ws: session terminée, reconnexion dans {backoff}s"),
+                Ok(()) => {
+                    // Fin propre (rollover ou close serveur) : reconnexion rapide.
+                    backoff = 1;
+                    tracing::info!("pm_ws: session terminée, reconnexion dans {backoff}s");
+                }
                 Err(e) => tracing::warn!(error = %e, backoff, "pm_ws: erreur, reconnexion"),
             }
             // Session morte → carnets invalides : on force le fallback REST.
@@ -114,12 +118,15 @@ async fn run_session(
             Ok(()) = rx.changed() => {
                 let new_tokens = rx.borrow().clone();
                 if !new_tokens.is_empty() {
-                    tracing::info!("pm_ws: resouscription rollover marché");
-                    // On purge les carnets des anciens tokens (mémoire bornée).
+                    // Le serveur ignore un 2e subscribe sur la même connexion
+                    // (leçon monolith : 1 souscription/connexion). On ferme la
+                    // session ; la boucle externe reconnecte avec les nouveaux
+                    // tokens. On purge les carnets périmés au passage.
+                    tracing::info!("pm_ws: rollover marché → reconnexion");
                     if let Ok(mut g) = state.write() {
                         g.books.retain(|k, _| new_tokens.contains(k));
                     }
-                    subscribe(&mut sink, &new_tokens).await?;
+                    return Ok(());
                 }
             }
         }
