@@ -32,6 +32,10 @@ pub struct GrinderState {
     pub panic_exits: u64,
     /// PnL réalisé cumulé (toutes fenêtres, tous runs).
     pub realized_pnl: f64,
+    /// Coupe-circuit wipe (HALT_ON_WIPE) : plus AUCUNE entrée tant qu'un humain
+    /// n'a pas remis ce flag à false dans le fichier d'état. Survit aux restarts.
+    #[serde(default)]
+    pub halted: bool,
 }
 
 impl GrinderState {

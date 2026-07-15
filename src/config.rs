@@ -55,6 +55,9 @@ pub struct Config {
     // --- Mode d'exécution ---
     /// "paper" (défaut) ou "live" (exige le binaire compilé --features live).
     pub mode: String,
+    /// Coupe-circuit : un wipe total à résolution (ou récupération < 1 $) gèle
+    /// définitivement les entrées jusqu'à intervention humaine (état persistant).
+    pub halt_on_wipe: bool,
 
     // --- Infra ---
     pub binance_ws_url: String,
@@ -112,6 +115,9 @@ impl Config {
             state_path: s("STATE_PATH", if live { "data/grinder_state_live.json" } else { "data/grinder_state.json" }),
             windows_path: s("WINDOWS_PATH", if live { "data/grinder_windows_live.jsonl" } else { "data/grinder_windows.jsonl" }),
             mode,
+            halt_on_wipe: env::var("HALT_ON_WIPE")
+                .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+                .unwrap_or(false),
         }
     }
 
@@ -145,6 +151,7 @@ impl Config {
             state_path: "/tmp/grinder_state_test.json".into(),
             windows_path: "/tmp/grinder_windows_test.jsonl".into(),
             mode: "paper".into(),
+            halt_on_wipe: false,
         }
     }
 }

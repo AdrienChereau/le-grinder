@@ -244,6 +244,10 @@ impl Grinder {
 
     /// Conditions d'entrée : fenêtre jouable, un côté ≥ ENTRY_MIN, garde verte.
     async fn try_enter(&mut self) {
+        if self.st.halted {
+            self.block("HALTED après wipe — relance manuelle requise (state.halted)").await;
+            return;
+        }
         let gs = self.guard.state();
         let now_ms = Utc::now().timestamp_millis() as u64;
         let Some(market) = self.market.clone() else { return };
@@ -462,6 +466,15 @@ impl Grinder {
             self.st.streak = 0;
             self.st.run_id += 1;
             self.st.stack = self.cfg.grind_base;
+            // Coupe-circuit (consigne du 15 juil.) : perte totale à résolution
+            // ou récupération < 1 $ → plus AUCUNE entrée, intervention humaine.
+            if self.cfg.halt_on_wipe && (outcome == "loss" || proceeds < 1.0) {
+                self.st.halted = true;
+                tracing::error!(
+                    outcome, proceeds,
+                    "🛑 WIPE — coupe-circuit activé : plus aucune entrée (state.halted=true)"
+                );
+            }
         }
         self.st.best_stack = self.st.best_stack.max(self.st.stack);
 
