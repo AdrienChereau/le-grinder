@@ -344,9 +344,12 @@ impl Grinder {
         let dist_usd = (gs.spot - pos.strike).abs();
         let reason = if gs.kill {
             Some("radar_kill")
-        } else if self.cfg.dist_exit_usd > 0.0 && dist_usd < self.cfg.dist_exit_usd {
-            // Plancher absolu : à quelques $ du strike, le z ne veut plus rien
-            // dire (calibration 15 juil. : le seul vrai crash est sorti à 10 $).
+        } else if self.cfg.dist_exit_usd > 0.0 && dist_usd < self.cfg.dist_exit_usd && z < 0.5 {
+            // Plancher absolu : à quelques $ du strike ET z dégradé — les deux
+            // ensemble, sinon un simple frôlement de la bande déclenche à tort
+            // (fausse panique live du 15 juil. 17:44 : dist 14 $ mais z 0,69,
+            // position jamais menacée). Le vrai crash (z −0,11, dist 10 $)
+            // déclenche toujours.
             Some("dist_floor")
         } else if z < self.cfg.z_exit {
             Some("z_floor")
