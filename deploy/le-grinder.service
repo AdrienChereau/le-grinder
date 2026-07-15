@@ -1,0 +1,23 @@
+# /etc/systemd/system/le-grinder.service
+# Remplace watchdog.sh : systemd relance le bot s'il meurt (pattern poly-radar).
+# Le .env est lu par dotenvy depuis WorkingDirectory.
+[Unit]
+Description=Le Grinder (Polymarket BTC 5m)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/le-grinder
+# Paper : target/release/le_grinder — Live : bin/le_grinder_live
+ExecStart=/home/ubuntu/le-grinder/target/release/le_grinder
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=5
+# Journal → journalctl -u le-grinder -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
