@@ -36,10 +36,14 @@ impl LiveExec {
 
     /// Achat taker de tout le `cash` disponible, cap de prix `price_cap`.
     /// Fill mesuré sur la réponse CLOB (fees réels inclus dans les montants).
+    ///
+    /// MONTANTS CLOB (leçon monolith 13 juil.) : un BUY FAK dépense size × prix
+    /// et le CLOB exige ce montant à 2 DÉCIMALES — 2,02 × 0,99 = 1,9998 →
+    /// « invalid amounts ». Taille ENTIÈRE × prix (2 déc.) = toujours valide.
     pub async fn buy_all(&self, token_id: &str, cash: f64, price_cap: f64) -> anyhow::Result<Fill> {
-        let size = round_size(cash / price_cap);
-        if size <= 0.0 {
-            anyhow::bail!("cash {cash:.2} trop petit pour une part à {price_cap}");
+        let size = (cash / price_cap).floor();
+        if size < 1.0 {
+            anyhow::bail!("cash {cash:.2} < 1 part entière à {price_cap} (minimum CLOB)");
         }
         let res = place_fak(
             self.armed,
