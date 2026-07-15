@@ -45,6 +45,10 @@ pub struct Config {
     /// Âge maximal du flux Binance : au-delà, garde aveugle → sortie de sécurité.
     pub guard_max_age_ms: u64,
 
+    // --- Mode d'exécution ---
+    /// "paper" (défaut) ou "live" (exige le binaire compilé --features live).
+    pub mode: String,
+
     // --- Infra ---
     pub binance_ws_url: String,
     pub dashboard_bind: String,
@@ -65,6 +69,8 @@ fn s(key: &str, default: &str) -> String {
 
 impl Config {
     pub fn from_env() -> Self {
+        let mode = s("TRADING_MODE", "paper").to_lowercase();
+        let live = mode == "live";
         Self {
             grind_base: f("GRIND_BASE", 1.0),
             entry_min: f("ENTRY_MIN", 0.95),
@@ -93,8 +99,10 @@ impl Config {
             // 0.0.0.0 : dashboards consultés via Tailscale (doctrine infra).
             dashboard_bind: s("DASH_BIND", "0.0.0.0"),
             dashboard_port: i("DASH_PORT", 8095) as u16,
-            state_path: s("STATE_PATH", "data/grinder_state.json"),
-            windows_path: s("WINDOWS_PATH", "data/grinder_windows.jsonl"),
+            // Doctrine split paper/live : jamais les mêmes fichiers d'état.
+            state_path: s("STATE_PATH", if live { "data/grinder_state_live.json" } else { "data/grinder_state.json" }),
+            windows_path: s("WINDOWS_PATH", if live { "data/grinder_windows_live.jsonl" } else { "data/grinder_windows.jsonl" }),
+            mode,
         }
     }
 
@@ -125,6 +133,7 @@ impl Config {
             dashboard_port: 0,
             state_path: "/tmp/grinder_state_test.json".into(),
             windows_path: "/tmp/grinder_windows_test.jsonl".into(),
+            mode: "paper".into(),
         }
     }
 }

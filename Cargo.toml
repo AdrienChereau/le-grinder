@@ -4,7 +4,20 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Quantitative Trading Team"]
 
+[features]
+default = []
+# `cargo build --features live` : ordres réels (SDK Polymarket POLY_1271 / sig_type=3).
+# Deux verrous : cette feature (compilation) + LIVE_ARMED=true (runtime).
+live = ["dep:alloy", "dep:polymarket_client_sdk_v2", "dep:hmac", "dep:sha2", "dep:base64"]
+
 [dependencies]
+# Live (feature-gated)
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
+alloy = { version = "2.1", default-features = false, features = ["signer-local", "sol-types"], optional = true }
+polymarket_client_sdk_v2 = { version = "0.6.0-canary.1", default-features = false, features = ["clob"], optional = true }
+
 # Asynchronisme & Runtime
 tokio = { version = "1.38", features = ["full"] }
 tokio-tungstenite = { version = "0.23", features = ["native-tls"] }

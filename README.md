@@ -63,16 +63,46 @@ cargo run --release
 Reset : **ne jamais supprimer les fichiers de `data/`** (doctrine). Pour
 repartir de zéro, pointer `STATE_PATH`/`WINDOWS_PATH` vers de nouveaux chemins.
 
-## Avant tout passage en live
+## Mode LIVE
 
-Bloqueurs connus, à traiter dans la matrice de complétude métier :
+Deux verrous indépendants :
+1. **Compilation** : `rustup run stable cargo build --release --features live`
+   (SDK/alloy exigent rustc ≥ 1.91 — le rustc Homebrew 1.86 du PATH ne suffit
+   pas, passer par la toolchain rustup). Binaire figé dans `bin/le_grinder_live`.
+2. **Runtime** : `TRADING_MODE=live` dans le `.env` **et** `LIVE_ARMED=true`.
+   Avec `LIVE_ARMED=false`, répétition générale : ordres signés + loggés,
+   jamais postés.
 
-- [ ] Frais taker réels des fenêtres 5 min (à trancher au 1er fill live).
-- [ ] Refresh de l'allowance CONDITIONAL après chaque BUY (sinon le SELL
-      catastrophe est rejeté « balance 0 »).
-- [ ] Vente catastrophe réelle en FAK (passe à toute taille) + vérification
-      `success/error_msg` de chaque POST.
-- [ ] `POLY_SIG_TYPE=3` (wallet de dépôt), signing, gestion des résidus.
-- [ ] Radar Tokyo distant (UDP `WireTick`) au lieu de la garde locale.
-- [ ] Mise minimale : un stack < ~5 $ ne remplit pas `orderMinSize` côté resting ;
-      les FAK taker passent, mais la granularité 2 décimales mord sur un stack de 1 $.
+```bash
+# .env : TRADING_MODE=live, LIVE_ARMED=false d'abord, credentials POLY_* remplis
+./bin/le_grinder_live          # répétition générale (aucun ordre posté)
+# puis LIVE_ARMED=true quand la répétition est propre
+```
+
+L'état live vit dans `data/grinder_state_live.json` / `grinder_windows_live.jsonl`
+(jamais partagés avec le paper). Le dashboard affiche le mode (badge rouge) et
+le collatéral wallet réel après chaque clôture — c'est LE PnL qui fait foi.
+
+### Matrice de complétude (état au 15 juil. 2026)
+
+- [x] Signing POLY_1271 / sig_type 3 (deposit wallet), client SDK authentifié au boot.
+- [x] Refresh allowance CONDITIONAL immédiatement après chaque BUY (sinon SELL
+      rejeté « balance 0 ») + retry « ne jamais abandonner sur balance 0 » au SELL.
+- [x] FAK uniquement (passe à toute taille), aucun ordre restant → ni cancel ni
+      heartbeat dead-man nécessaires.
+- [x] Vérification `success`/`error_msg` de chaque POST (200 ≠ succès).
+- [x] Tailles 2 décimales, prix arrondi au tick 0.01.
+- [x] Vente catastrophe : solde CONDITIONAL on-chain = vérité, FAK plancher
+      0.01, 2e FAK sur résidu, résidu final loggé (ira à la résolution).
+- [x] Stack plafonné au collatéral réel du wallet au boot ; collatéral relu et
+      loggé après chaque clôture (vérité wallet vs ledger interne).
+- [ ] **Redemption post-résolution à VÉRIFIER au 1er cycle live** : on suppose
+      l'auto-settlement Polymarket des marchés crypto 5 min (USDC recrédité
+      seul). Si le wallet ne bouge pas après une fenêtre gagnée → bloqueur,
+      il faudra un redeem CTF explicite.
+- [ ] Frais réels `crypto_fees_v2` à mesurer au 1er fill (maker=taker=1000 —
+      l'impact exact sur les montants `making/taking` reste à confirmer).
+- [ ] Garde Tokyo LOCALE (même machine) : latence Mac→CLOB non optimisée ;
+      le radar Tokyo distant (UDP WireTick) reste un chantier ultérieur.
+- [ ] Mise minimale réelle : FAK accepté à toute taille d'après nos leçons,
+      mais un stack < 1 $ peut buter sur des minima CLOB non documentés.

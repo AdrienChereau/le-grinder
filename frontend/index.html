@@ -27,7 +27,7 @@
 </style>
 </head>
 <body>
-<h1>LE GRINDER <span class="badge">PAPER</span></h1>
+<h1>LE GRINDER <span class="badge" id="mode">…</span></h1>
 
 <div class="grid">
   <div class="card">
@@ -38,6 +38,7 @@
     <div class="kv"><span>Meilleur stack</span><b id="best_stack">–</b></div>
     <div class="kv"><span>Meilleure série</span><b id="best_streak">–</b></div>
     <div class="kv"><span>PnL réalisé</span><b id="pnl">–</b></div>
+    <div class="kv"><span>Wallet USDC (live)</span><b id="live_collateral">–</b></div>
   </div>
   <div class="card">
     <h2>Fenêtre</h2>
@@ -89,6 +90,11 @@ async function tick() {
   try { s = await (await fetch('/state')).json(); }
   catch { $('binance').textContent = 'déconnecté'; return; }
 
+  const m = $('mode');
+  m.textContent = (s.mode || 'paper').toUpperCase();
+  m.style.background = s.mode === 'live' ? 'var(--red)' : 'var(--amber)';
+  m.style.color = s.mode === 'live' ? '#fff' : '#000';
+  $('live_collateral').textContent = s.live_collateral ? usd(s.live_collateral) : '–';
   $('stack').textContent = usd(s.stack);
   $('streak').textContent = s.streak;
   $('run').textContent = s.run_id;

@@ -46,6 +46,8 @@ pub struct DashState {
     pub panic_exits: u64,
     pub realized_pnl: f64,
     pub last_block_reason: String,
+    pub mode: String,        // "paper" | "live" | "live (dry-run)"
+    pub live_collateral: f64, // USDC réel du wallet (0 en paper)
     // Position ouverte (zéros si aucune)
     pub pos_side: String,
     pub pos_shares: f64,

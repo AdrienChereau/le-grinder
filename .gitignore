@@ -5,3 +5,4 @@
 /data/*.bak*
 *.log
 .DS_Store
+/bin/

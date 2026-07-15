@@ -1,4 +1,8 @@
-//! Point d'entrée du binaire `le_grinder` — PAPER ONLY.
+//! Point d'entrée du binaire `le_grinder`.
+//!
+//! Mode par défaut : PAPER. Le live exige DEUX verrous :
+//!   1. compilation `--features live` (sinon TRADING_MODE=live refuse de démarrer),
+//!   2. `LIVE_ARMED=true` au runtime (sinon ordres signés + loggés, jamais postés).
 //!
 //! Un seul process (mode « Tokyo local ») :
 //!   Binance WS ──► TokyoGuard (drift / vol / radar)
@@ -13,6 +17,8 @@ mod connectors;
 mod dashboard;
 mod engines;
 mod grinder;
+#[cfg(feature = "live")]
+mod live;
 mod paper;
 mod state;
 mod tokyo;
@@ -32,8 +38,8 @@ async fn main() -> anyhow::Result<()> {
 
     let cfg = config::Config::from_env();
     tracing::info!(
-        base = cfg.grind_base, entry_min = cfg.entry_min, z_entry = cfg.z_entry,
-        "Démarrage Le Grinder (paper)"
+        mode = %cfg.mode, base = cfg.grind_base, entry_min = cfg.entry_min, z_entry = cfg.z_entry,
+        "Démarrage Le Grinder"
     );
 
     // Dashboard.

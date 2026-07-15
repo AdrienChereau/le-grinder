@@ -21,7 +21,9 @@ use crate::connectors::binance::price_at_window_open;
 use crate::connectors::pm_ws::{self, PmWsShared};
 use crate::connectors::polymarket::{Market, PolyBook, PolymarketClient};
 use crate::dashboard::Shared as DashShared;
-use crate::paper;
+#[cfg(feature = "live")]
+use crate::live::LiveExec;
+use crate::paper::{self, Fill};
 use crate::state::{self, GrinderState, WindowRecord};
 use crate::tokyo::{GuardState, TokyoGuard};
 use crate::types::BookUpdate;
@@ -75,6 +77,9 @@ pub struct Grinder {
     strike: Option<f64>,
     /// Dernière fenêtre jouée (entrée prise) — une seule entrée par fenêtre.
     last_played_window: i64,
+    /// Exécuteur live (None = paper). Compilé uniquement avec --features live.
+    #[cfg(feature = "live")]
+    live: Option<LiveExec>,
 }
 
 pub async fn run(
@@ -82,9 +87,38 @@ pub async fn run(
     mut binance_rx: watch::Receiver<Option<BookUpdate>>,
     dash: DashShared,
 ) -> anyhow::Result<()> {
+    let live_requested = cfg.mode == "live";
+    #[cfg(not(feature = "live"))]
+    if live_requested {
+        anyhow::bail!("TRADING_MODE=live mais binaire compilé SANS --features live");
+    }
+    #[cfg(feature = "live")]
+    let live = if live_requested {
+        let (exec, collateral) = LiveExec::startup().await?;
+        if collateral < cfg.grind_base {
+            anyhow::bail!(
+                "collatéral {collateral:.2}$ < mise de base {}$ — dépôt requis",
+                cfg.grind_base
+            );
+        }
+        Some(exec)
+    } else {
+        None
+    };
+
     let pm_state: PmWsShared = Default::default();
     let tokens_tx = pm_ws::spawn(pm_state.clone());
-    let st = state::load(&cfg.state_path, cfg.grind_base);
+    let mut st = state::load(&cfg.state_path, cfg.grind_base);
+    // Live : le stack ne peut jamais excéder le collatéral réel du wallet.
+    #[cfg(feature = "live")]
+    if let Some(l) = &live {
+        if let Ok(c) = l.collateral().await {
+            if st.stack > c {
+                tracing::warn!(stack = st.stack, collateral = c, "stack plafonné au collatéral");
+                st.stack = c;
+            }
+        }
+    }
     tracing::info!(stack = st.stack, run = st.run_id, streak = st.streak, "état Grinder chargé");
     {
         let mut d = dash.write().await;
@@ -105,6 +139,8 @@ pub async fn run(
         market: None,
         strike: None,
         last_played_window: 0,
+        #[cfg(feature = "live")]
+        live,
         cfg,
     };
 
@@ -237,9 +273,9 @@ impl Grinder {
             }
 
             // Entrée taker : tout le stack, balayage du carnet réel.
-            let fill = paper::sweep_buy(&book, self.st.stack, self.cfg.entry_max, self.cfg.taker_fee_rate);
+            let Some(fill) = self.exec_buy(&book, &token).await else { continue };
             if fill.shares <= 0.0 {
-                self.block("profondeur ask insuffisante").await;
+                self.block("profondeur ask insuffisante (ou dry-run live)").await;
                 continue;
             }
             let cash_left = (self.st.stack - fill.notional - fill.fees).max(0.0);
@@ -304,10 +340,41 @@ impl Grinder {
         self.phase = Phase::Scanning;
     }
 
+    /// Achat : CLOB réel en live, sweep simulé en paper.
+    async fn exec_buy(&self, book: &PolyBook, token: &str) -> Option<Fill> {
+        #[cfg(feature = "live")]
+        if let Some(l) = &self.live {
+            return match l.buy_all(token, self.st.stack, self.cfg.entry_max).await {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    tracing::error!(error = %e, "BUY live échoué");
+                    None
+                }
+            };
+        }
+        let _ = token;
+        Some(paper::sweep_buy(book, self.st.stack, self.cfg.entry_max, self.cfg.taker_fee_rate))
+    }
+
+    /// Vente catastrophe : FAK plancher 0.01 en live, sweep+haircut en paper.
+    async fn exec_sell(&self, token: &str, shares: f64) -> Fill {
+        #[cfg(feature = "live")]
+        if let Some(l) = &self.live {
+            return match l.sell_all(token, shares).await {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::error!(error = %e, "SELL live échoué — résidu à la résolution");
+                    Fill::default()
+                }
+            };
+        }
+        let book = self.best_book(token).await.unwrap_or_default();
+        paper::sweep_sell_panic(&book, shares, self.cfg.panic_haircut, self.cfg.taker_fee_rate)
+    }
+
     /// Vente catastrophe : balayage des bids avec haircut, le reste part à zéro.
     async fn panic_exit(&mut self, pos: &Position, reason: &str, z: f64, gs: GuardState) {
-        let book = self.best_book(&pos.token_id).await.unwrap_or_default();
-        let fill = paper::sweep_sell_panic(&book, pos.shares, self.cfg.panic_haircut, self.cfg.taker_fee_rate);
+        let fill = self.exec_sell(&pos.token_id, pos.shares).await;
         let proceeds = (fill.notional - fill.fees).max(0.0) + pos.cash_left;
         let recovered_pct = if pos.cost > 0.0 { 100.0 * proceeds / pos.cost } else { 0.0 };
         tracing::warn!(
@@ -404,6 +471,18 @@ impl Grinder {
         if let Err(e) = state::save(&self.cfg.state_path, &self.st) {
             tracing::error!(error = %e, "sauvegarde état échouée");
         }
+        // Live : le collatéral wallet est le SEUL PnL qui fait foi — on le lit
+        // après chaque clôture et on l'affiche à côté du ledger interne.
+        #[cfg(feature = "live")]
+        if let Some(l) = &self.live {
+            match l.collateral().await {
+                Ok(c) => {
+                    tracing::info!(collateral = c, ledger_stack = self.st.stack, "vérité wallet post-settle");
+                    self.dash.write().await.live_collateral = c;
+                }
+                Err(e) => tracing::warn!(error = %e, "lecture collatéral post-settle échouée"),
+            }
+        }
         let mut d = self.dash.write().await;
         d.windows.push(rec);
         if d.windows.len() > 50 {
@@ -454,6 +533,11 @@ impl Grinder {
             }
         }
         d.strike = self.strike.unwrap_or(0.0);
+        d.mode = self.cfg.mode.clone();
+        #[cfg(feature = "live")]
+        if let Some(l) = &self.live {
+            d.mode = if l.armed { "live".into() } else { "live (dry-run)".into() };
+        }
         // Meilleurs asks affichés depuis le cache WS (pas de REST dans le publish).
         if let (Some(m), Ok(g)) = (&self.market, self.pm_state.read()) {
             d.up_ask = g.books.get(&m.up_token_id).and_then(|b| b.best_ask()).unwrap_or(0.0);
