@@ -19,6 +19,13 @@ pub struct Config {
     pub z_exit: f64,
     /// Drift log/s à CONTRE-SENS au-delà duquel on sort (échelle 1e-5, cf. doctrine).
     pub drift_exit: f64,
+    /// Plancher de marge ABSOLUE en $ : |spot−strike| < seuil → panique,
+    /// quel que soit le z. 0 = désactivé (défaut — activé en paper seulement
+    /// pour l'instant, calibration nuit du 15 juil.).
+    pub dist_exit_usd: f64,
+    /// Flux Binance périmé > N s EN POSITION → sortie de sécurité (garde
+    /// aveugle). 0 = désactivé (défaut).
+    pub guard_stale_exit_s: i64,
     /// On n'entre plus s'il reste moins que ça (secondes) — pas le temps de sortir.
     pub min_remaining_s: i64,
     /// On n'entre pas s'il reste plus que ça (le 95c trop tôt est suspect).
@@ -78,6 +85,8 @@ impl Config {
             z_entry: f("Z_ENTRY", 1.5),
             z_exit: f("Z_EXIT", 0.5),
             drift_exit: f("DRIFT_EXIT", 3e-5),
+            dist_exit_usd: f("DIST_EXIT_USD", 0.0),
+            guard_stale_exit_s: i("GUARD_STALE_EXIT_S", 0),
             min_remaining_s: i("MIN_REMAINING_S", 15),
             max_remaining_s: i("MAX_REMAINING_S", 240),
             panic_haircut: f("PANIC_HAIRCUT", 0.5),
@@ -115,6 +124,8 @@ impl Config {
             z_entry: 1.5,
             z_exit: 0.5,
             drift_exit: 3e-5,
+            dist_exit_usd: 0.0,
+            guard_stale_exit_s: 0,
             min_remaining_s: 15,
             max_remaining_s: 240,
             panic_haircut: 0.5,

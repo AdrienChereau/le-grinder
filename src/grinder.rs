@@ -179,6 +179,24 @@ impl Grinder {
             }
         }
 
+        // 1bis. Garde aveugle : flux Binance mort EN POSITION → sortie de
+        // sécurité (check_exits ne tourne que sur tick, donc jamais si le flux
+        // est mort — ce chemin-ci est cadencé par le housekeeping 2 Hz).
+        if self.cfg.guard_stale_exit_s > 0 {
+            if let Phase::InPosition(pos) = &self.phase {
+                let gs = self.guard.state();
+                let max_age_ms = (self.cfg.guard_stale_exit_s * 1000) as u64;
+                if now_ms < pos.end_ms && !gs.is_fresh(now_ms as u64, max_age_ms) {
+                    let pos = pos.clone();
+                    tracing::warn!("garde AVEUGLE (flux Binance périmé) — sortie de sécurité");
+                    let remaining_s = ((pos.end_ms - now_ms) as f64 / 1000.0).max(0.0);
+                    let z = gs.margin_z(pos.strike, pos.dir(), remaining_s);
+                    self.panic_exit(&pos, "guard_stale", z, gs).await;
+                    self.phase = Phase::Scanning;
+                }
+            }
+        }
+
         // 2. Rollover / découverte du marché courant.
         let need_market = match &self.market {
             None => true,
@@ -323,8 +341,13 @@ impl Grinder {
         let remaining_s = ((pos.end_ms - now_ms) as f64 / 1000.0).max(0.0);
         let z = gs.margin_z(pos.strike, pos.dir(), remaining_s);
 
+        let dist_usd = (gs.spot - pos.strike).abs();
         let reason = if gs.kill {
             Some("radar_kill")
+        } else if self.cfg.dist_exit_usd > 0.0 && dist_usd < self.cfg.dist_exit_usd {
+            // Plancher absolu : à quelques $ du strike, le z ne veut plus rien
+            // dire (calibration 15 juil. : le seul vrai crash est sorti à 10 $).
+            Some("dist_floor")
         } else if z < self.cfg.z_exit {
             Some("z_floor")
         } else if gs.drift * pos.dir() < -self.cfg.drift_exit {
