@@ -1,0 +1,7 @@
+/target
+.env
+/data/*.json
+/data/*.jsonl
+/data/*.bak*
+*.log
+.DS_Store

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Le Grinder</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#c9d1d9; --dim:#8b949e;
+          --green:#3fb950; --red:#f85149; --amber:#d29922; --blue:#58a6ff; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; padding:16px; }
+  h1 { font-size:18px; margin-bottom:12px; letter-spacing:.5px; }
+  h1 .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--amber); color:#000; vertical-align:middle; margin-left:8px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-bottom:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .card h2 { font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+  .kv { display:flex; justify-content:space-between; padding:2px 0; }
+  .kv span:first-child { color:var(--dim); }
+  .big { font-size:26px; font-weight:700; }
+  .green { color:var(--green); } .red { color:var(--red); } .amber { color:var(--amber); } .blue { color:var(--blue); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:right; padding:4px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--dim); font-weight:normal; }
+  td:first-child, th:first-child { text-align:left; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<h1>LE GRINDER <span class="badge">PAPER</span></h1>
+
+<div class="grid">
+  <div class="card">
+    <h2>Stack</h2>
+    <div class="big" id="stack">–</div>
+    <div class="kv"><span>Série (wins)</span><b id="streak">–</b></div>
+    <div class="kv"><span>Run #</span><b id="run">–</b></div>
+    <div class="kv"><span>Meilleur stack</span><b id="best_stack">–</b></div>
+    <div class="kv"><span>Meilleure série</span><b id="best_streak">–</b></div>
+    <div class="kv"><span>PnL réalisé</span><b id="pnl">–</b></div>
+  </div>
+  <div class="card">
+    <h2>Fenêtre</h2>
+    <div class="kv"><span>Phase</span><b id="phase">–</b></div>
+    <div class="kv"><span>Marché</span><b id="slug">–</b></div>
+    <div class="kv"><span>Restant</span><b id="remaining">–</b></div>
+    <div class="kv"><span>Strike</span><b id="strike">–</b></div>
+    <div class="kv"><span>Ask Up / Down</span><b id="asks">–</b></div>
+    <div class="kv"><span>Blocage</span><b id="block" class="amber">–</b></div>
+  </div>
+  <div class="card">
+    <h2>Garde Tokyo</h2>
+    <div class="kv"><span>Binance</span><b id="binance">–</b></div>
+    <div class="kv"><span>Spot BTC</span><b id="spot">–</b></div>
+    <div class="kv"><span>Drift (log/s)</span><b id="drift">–</b></div>
+    <div class="kv"><span>Sigma (ann.)</span><b id="sigma">–</b></div>
+    <div class="kv"><span>OBI / Vélocité</span><b id="obivel">–</b></div>
+    <div class="kv"><span>KILL</span><b id="kill">–</b></div>
+  </div>
+  <div class="card">
+    <h2>Position</h2>
+    <div class="kv"><span>Côté</span><b id="pos_side">–</b></div>
+    <div class="kv"><span>Parts</span><b id="pos_shares">–</b></div>
+    <div class="kv"><span>Prix d'entrée</span><b id="pos_entry">–</b></div>
+    <div class="kv"><span>Engagé</span><b id="pos_cost">–</b></div>
+    <div class="kv"><span>Marge z</span><b id="pos_z">–</b></div>
+    <div class="kv"><span>W / L / Panics</span><b id="wlp">–</b></div>
+  </div>
+</div>
+
+<div class="card scroll">
+  <h2>Fenêtres jouées (50 dernières)</h2>
+  <table>
+    <thead><tr>
+      <th>Heure</th><th>Côté</th><th>Entrée</th><th>Parts</th><th>Engagé</th>
+      <th>Issue</th><th>Raison</th><th>Récupéré</th><th>PnL</th><th>Stack</th><th>Série</th><th>Run</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const usd = v => '$' + (+v).toFixed(2);
+const cls = (el, c) => { el.className = c; };
+
+async function tick() {
+  let s;
+  try { s = await (await fetch('/state')).json(); }
+  catch { $('binance').textContent = 'déconnecté'; return; }
+
+  $('stack').textContent = usd(s.stack);
+  $('streak').textContent = s.streak;
+  $('run').textContent = s.run_id;
+  $('best_stack').textContent = usd(s.best_stack);
+  $('best_streak').textContent = s.best_streak;
+  $('pnl').textContent = usd(s.realized_pnl);
+  cls($('pnl'), s.realized_pnl >= 0 ? 'green' : 'red');
+
+  $('phase').textContent = s.phase;
+  cls($('phase'), s.phase === 'in_position' ? 'blue' : '');
+  $('slug').textContent = s.market_slug || '–';
+  $('remaining').textContent = s.remaining_s + ' s';
+  $('strike').textContent = s.strike ? s.strike.toFixed(2) : '–';
+  $('asks').textContent = s.up_ask.toFixed(2) + ' / ' + s.down_ask.toFixed(2);
+  $('block').textContent = s.last_block_reason || '–';
+
+  $('binance').textContent = s.binance_connected ? `frais (${s.guard_age_ms} ms)` : 'PÉRIMÉ';
+  cls($('binance'), s.binance_connected ? 'green' : 'red');
+  $('spot').textContent = s.spot.toFixed(2);
+  $('drift').textContent = s.drift.toExponential(2);
+  $('sigma').textContent = s.sigma.toFixed(3);
+  $('obivel').textContent = s.obi.toFixed(2) + ' / ' + s.velocity.toFixed(1);
+  $('kill').textContent = s.kill ? 'ACTIF' : 'non';
+  cls($('kill'), s.kill ? 'red' : 'green');
+
+  $('pos_side').textContent = s.pos_side || '–';
+  $('pos_shares').textContent = s.pos_shares ? s.pos_shares.toFixed(2) : '–';
+  $('pos_entry').textContent = s.pos_entry_price ? s.pos_entry_price.toFixed(3) : '–';
+  $('pos_cost').textContent = s.pos_cost ? usd(s.pos_cost) : '–';
+  $('pos_z').textContent = s.pos_side ? s.pos_z.toFixed(2) : '–';
+  cls($('pos_z'), s.pos_z >= 1 ? 'green' : (s.pos_side ? 'red' : ''));
+  $('wlp').textContent = `${s.wins} / ${s.losses} / ${s.panic_exits}`;
+
+  $('rows').innerHTML = [...s.windows].reverse().map(w => {
+    const c = w.outcome === 'win' ? 'green' : (w.outcome === 'panic' ? 'amber' : 'red');
+    return `<tr>
+      <td>${w.ts.slice(11,19)}</td><td>${w.side}</td><td>${w.entry_price.toFixed(3)}</td>
+      <td>${w.shares.toFixed(2)}</td><td>${usd(w.cost)}</td>
+      <td class="${c}">${w.outcome}</td><td>${w.reason}</td>
+      <td>${usd(w.proceeds)}</td><td class="${w.pnl >= 0 ? 'green' : 'red'}">${usd(w.pnl)}</td>
+      <td>${usd(w.stack_after)}</td><td>${w.streak_after}</td><td>${w.run_id}</td>
+    </tr>`;
+  }).join('');
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

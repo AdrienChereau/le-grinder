@@ -1,0 +1,180 @@
+//! Persistance de l'état du Grinder.
+//!
+//! Deux fichiers, JAMAIS supprimés ni tronqués (doctrine : un reset se fait en
+//! relançant le process, pas en effaçant les données) :
+//! - `grinder_state.json`   : état courant (stack, série, compteurs) — réécrit
+//!   de façon atomique (tmp + rename) après chaque fenêtre ;
+//! - `grinder_windows.jsonl` : grand livre append-only, une ligne par fenêtre jouée.
+
+use std::fs;
+use std::io::Write as _;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+/// État persistant du compoundage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrinderState {
+    /// Cash du run courant, intégralement remis en jeu à chaque fenêtre.
+    pub stack: f64,
+    /// Wins consécutifs du run courant.
+    pub streak: u32,
+    /// Identifiant de run — incrémenté à chaque wipe/reset à la base.
+    pub run_id: u64,
+    /// Meilleure série de wins jamais atteinte.
+    pub best_streak: u32,
+    /// Plus haut stack jamais atteint.
+    pub best_stack: f64,
+    // Compteurs vie entière.
+    pub windows_played: u64,
+    pub wins: u64,
+    pub losses: u64,
+    pub panic_exits: u64,
+    /// PnL réalisé cumulé (toutes fenêtres, tous runs).
+    pub realized_pnl: f64,
+}
+
+impl GrinderState {
+    pub fn fresh(base: f64) -> Self {
+        Self {
+            stack: base,
+            streak: 0,
+            run_id: 1,
+            best_streak: 0,
+            best_stack: base,
+            windows_played: 0,
+            wins: 0,
+            losses: 0,
+            panic_exits: 0,
+            realized_pnl: 0.0,
+        }
+    }
+}
+
+/// Une fenêtre jouée — ligne du grand livre JSONL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowRecord {
+    pub ts: String,        // horodatage RFC3339 de la clôture de la ligne
+    pub window_ts: i64,    // début unix de la fenêtre 5 min
+    pub slug: String,
+    pub side: String,      // "up" | "down"
+    pub entry_price: f64,  // prix moyen d'entrée
+    pub shares: f64,
+    pub cost: f64,         // notional + frais d'entrée
+    pub fees: f64,         // frais totaux (entrée + sortie éventuelle)
+    pub outcome: String,   // "win" | "loss" | "panic"
+    pub reason: String,    // détail sortie ("resolution", "radar_kill", "z_floor", …)
+    pub proceeds: f64,     // $ récupérés (payout ou vente catastrophe) + cash résiduel
+    pub pnl: f64,          // proceeds − stack engagé
+    pub stack_after: f64,
+    pub streak_after: u32,
+    pub run_id: u64,
+    pub strike: f64,
+    pub spot_at_exit: f64,
+    pub z_at_entry: f64,
+    pub z_at_exit: f64,
+    pub drift_at_exit: f64,
+}
+
+/// Charge l'état, ou en crée un neuf si le fichier n'existe pas.
+pub fn load(path: &str, base: f64) -> GrinderState {
+    match fs::read_to_string(path) {
+        Ok(txt) => match serde_json::from_str(&txt) {
+            Ok(st) => st,
+            Err(e) => {
+                // Fichier corrompu : on NE l'écrase pas aveuglément — on le copie
+                // en .corrupt-<ts> puis on repart d'un état neuf.
+                let bak = format!("{path}.corrupt-{}", chrono::Utc::now().timestamp());
+                let _ = fs::copy(path, &bak);
+                tracing::error!(error = %e, %bak, "état illisible, sauvegardé puis réinitialisé");
+                GrinderState::fresh(base)
+            }
+        },
+        Err(_) => GrinderState::fresh(base),
+    }
+}
+
+/// Écriture atomique de l'état (tmp + rename).
+pub fn save(path: &str, st: &GrinderState) -> anyhow::Result<()> {
+    if let Some(dir) = Path::new(path).parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let tmp = format!("{path}.tmp");
+    fs::write(&tmp, serde_json::to_vec_pretty(st)?)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Ajoute une ligne au grand livre (append-only).
+pub fn append_window(path: &str, rec: &WindowRecord) -> anyhow::Result<()> {
+    if let Some(dir) = Path::new(path).parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut f = fs::OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(f, "{}", serde_json::to_string(rec)?)?;
+    Ok(())
+}
+
+/// Relit les `n` dernières fenêtres du grand livre (pour le dashboard au boot).
+pub fn tail_windows(path: &str, n: usize) -> Vec<WindowRecord> {
+    let Ok(txt) = fs::read_to_string(path) else {
+        return vec![];
+    };
+    let mut v: Vec<WindowRecord> = txt
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    if v.len() > n {
+        v.drain(..v.len() - n);
+    }
+    v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_roundtrip_and_ledger_append() {
+        let dir = std::env::temp_dir().join(format!("grinder-test-{}", std::process::id()));
+        let sp = dir.join("state.json").to_string_lossy().into_owned();
+        let wp = dir.join("windows.jsonl").to_string_lossy().into_owned();
+
+        let mut st = GrinderState::fresh(1.0);
+        st.stack = 2.34;
+        st.wins = 7;
+        save(&sp, &st).unwrap();
+        let loaded = load(&sp, 1.0);
+        assert_eq!(loaded.wins, 7);
+        assert!((loaded.stack - 2.34).abs() < 1e-9);
+
+        let rec = WindowRecord {
+            ts: "2026-07-15T00:00:00Z".into(),
+            window_ts: 1_784_000_100,
+            slug: "btc-updown-5m-1784000100".into(),
+            side: "up".into(),
+            entry_price: 0.96,
+            shares: 1.04,
+            cost: 1.0,
+            fees: 0.003,
+            outcome: "win".into(),
+            reason: "resolution".into(),
+            proceeds: 1.04,
+            pnl: 0.04,
+            stack_after: 1.04,
+            streak_after: 1,
+            run_id: 1,
+            strike: 60000.0,
+            spot_at_exit: 60120.0,
+            z_at_entry: 2.1,
+            z_at_exit: 3.0,
+            drift_at_exit: 1.2e-5,
+        };
+        append_window(&wp, &rec).unwrap();
+        append_window(&wp, &rec).unwrap();
+        assert_eq!(tail_windows(&wp, 10).len(), 2);
+        assert_eq!(tail_windows(&wp, 1).len(), 1);
+
+        let _ = std::fs::remove_dir_all(dir); // nettoyage du répertoire de TEST uniquement
+    }
+}
