@@ -165,6 +165,43 @@ impl PolymarketClient {
         }))
     }
 
+    /// Verdict OFFICIEL d'une fenêtre close (Gamma `outcomePrices`).
+    /// `Some(true)` = Up a gagné, `Some(false)` = Down, `None` = pas encore résolu.
+    ///
+    /// Leçon du 16 juil. : le proxy « spot Binance vs strike » s'est trompé à
+    /// 12 $ du strike (micro-price décalé de 28 $ de la clôture) → fausse
+    /// défaite, wipe comptable et halt à tort. La résolution Chainlink de
+    /// Polymarket est la seule vérité ; le proxy n'est plus qu'un fallback.
+    pub async fn get_official_up_won(&self, slug: &str) -> anyhow::Result<Option<bool>> {
+        let url = format!("{GAMMA_BASE}/events/slug/{slug}");
+        let resp = self.http.get(&url).send().await?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let event: serde_json::Value = resp.json().await?;
+        let Some(m) = event.get("markets").and_then(|v| v.as_array()).and_then(|a| a.first())
+        else {
+            return Ok(None);
+        };
+        if !m.get("closed").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Ok(None);
+        }
+        let outcomes = parse_json_str_array(m.get("outcomes"));
+        let prices = parse_json_str_array(m.get("outcomePrices"));
+        let up_idx = outcomes
+            .iter()
+            .position(|o| {
+                let o = o.to_lowercase();
+                o == "up" || o == "yes"
+            })
+            .unwrap_or(0);
+        match prices.get(up_idx).and_then(|s| s.parse::<f64>().ok()) {
+            Some(p) if p > 0.99 => Ok(Some(true)),
+            Some(p) if p < 0.01 => Ok(Some(false)),
+            _ => Ok(None), // closed mais prix ambigus : on attend
+        }
+    }
+
     /// Snapshot complet du carnet CLOB d'un token.
     pub async fn get_book(&self, token_id: &str) -> anyhow::Result<PolyBook> {
         let url = format!("{CLOB_BASE}/book");

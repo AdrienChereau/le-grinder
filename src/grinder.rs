@@ -170,12 +170,27 @@ impl Grinder {
     async fn housekeeping(&mut self) {
         let now_ms = Utc::now().timestamp_millis();
 
-        // 1. Résolution d'une position arrivée à échéance.
+        // 1. Résolution d'une position arrivée à échéance — par le verdict
+        // OFFICIEL Polymarket (Gamma), le proxy Binance n'est qu'un fallback
+        // après 90 s (leçon 16 juil. : fausse défaite à 12 $ du strike).
         if let Phase::InPosition(pos) = &self.phase {
             if now_ms >= pos.end_ms {
                 let pos = pos.clone();
-                self.resolve(&pos).await;
-                self.phase = Phase::Scanning;
+                match self.client.get_official_up_won(&pos.slug).await {
+                    Ok(Some(up_won)) => {
+                        self.resolve(&pos, up_won, "resolution").await;
+                        self.phase = Phase::Scanning;
+                    }
+                    _ if now_ms >= pos.end_ms + 90_000 => {
+                        let up_won = self.guard.state().spot > pos.strike;
+                        tracing::warn!(
+                            "verdict officiel indisponible après 90 s — fallback proxy Binance"
+                        );
+                        self.resolve(&pos, up_won, "resolution_proxy").await;
+                        self.phase = Phase::Scanning;
+                    }
+                    _ => {} // verdict pas encore publié : on réessaie au prochain tick
+                }
             }
         }
 
@@ -415,11 +430,11 @@ impl Grinder {
         self.settle(pos, "panic", reason, proceeds, fill.fees, z, gs).await;
     }
 
-    /// Résolution à l'échéance : spot Binance vs strike (proxy Chainlink).
-    /// Égalité parfaite → défaite (conservateur).
-    async fn resolve(&mut self, pos: &Position) {
+    /// Clôture à l'échéance. `up_won` vient du verdict officiel Gamma (ou du
+    /// proxy Binance en fallback — `reason` distingue les deux dans le ledger).
+    async fn resolve(&mut self, pos: &Position, up_won: bool, reason: &str) {
         let gs = self.guard.state();
-        let won = (gs.spot - pos.strike) * pos.dir() > 0.0;
+        let won = up_won == pos.side_up;
         let proceeds = if won { pos.shares + pos.cash_left } else { pos.cash_left };
         if won {
             self.st.wins += 1;
@@ -429,10 +444,10 @@ impl Grinder {
         let remaining_s = 0.0;
         let z = gs.margin_z(pos.strike, pos.dir(), remaining_s);
         tracing::info!(
-            won, spot = gs.spot, strike = pos.strike, proceeds,
+            won, up_won, reason, spot = gs.spot, strike = pos.strike, proceeds,
             "résolution fenêtre {}", pos.slug
         );
-        self.settle(pos, if won { "win" } else { "loss" }, "resolution", proceeds, 0.0, z, gs)
+        self.settle(pos, if won { "win" } else { "loss" }, reason, proceeds, 0.0, z, gs)
             .await;
     }
 
