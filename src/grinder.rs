@@ -24,6 +24,7 @@ use crate::dashboard::Shared as DashShared;
 #[cfg(feature = "live")]
 use crate::live::LiveExec;
 use crate::paper::{self, Fill};
+use crate::remote_guard::{self, RemoteShared};
 use crate::state::{self, GrinderState, WindowRecord};
 use crate::tokyo::{GuardState, TokyoGuard};
 use crate::types::BookUpdate;
@@ -83,6 +84,8 @@ pub struct Grinder {
     /// Levé par la tâche de réconciliation si le verdict officiel contredit
     /// notre résolution kline → halt au prochain housekeeping.
     reconcile_halt: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Flux radar Tokyo distant (None = garde locale seule).
+    remote: Option<RemoteShared>,
 }
 
 pub async fn run(
@@ -108,6 +111,23 @@ pub async fn run(
     } else {
         None
     };
+
+    // Garde distante (radar Tokyo) : optionnelle, repli local automatique.
+    let (remote, mut remote_rx, _keep_remote_tx);
+    match &cfg.signal_listen {
+        Some(addr) => {
+            let (st, rx) = remote_guard::spawn(addr.clone(), cfg.kill_latch_ms);
+            remote = Some(st);
+            remote_rx = rx;
+            _keep_remote_tx = None;
+        }
+        None => {
+            let (tx, rx) = watch::channel(0u64);
+            remote = None;
+            remote_rx = rx;
+            _keep_remote_tx = Some(tx); // garde le canal vivant (jamais de pulse)
+        }
+    }
 
     let pm_state: PmWsShared = Default::default();
     let tokens_tx = pm_ws::spawn(pm_state.clone());
@@ -145,6 +165,7 @@ pub async fn run(
         #[cfg(feature = "live")]
         live,
         reconcile_halt: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        remote,
         cfg,
     };
 
@@ -157,8 +178,16 @@ pub async fn run(
                 }
                 let update = binance_rx.borrow().clone();
                 if let Some(u) = update {
-                    let gs = g.guard.update(&u);
-                    // Chemin chaud : la position est réévaluée à CHAQUE tick (10 Hz).
+                    g.guard.update(&u); // entretient la garde locale (repli)
+                    // Chemin chaud : réévaluation à CHAQUE tick (source fusionnée).
+                    let gs = g.guard_now();
+                    g.check_exits(gs).await;
+                }
+            }
+            changed = remote_rx.changed() => {
+                // Tick radar Tokyo (10 Hz) : même chemin chaud que Binance local.
+                if changed.is_ok() {
+                    let gs = g.guard_now();
                     g.check_exits(gs).await;
                 }
             }
@@ -170,6 +199,23 @@ pub async fn run(
 }
 
 impl Grinder {
+    /// État de garde courant : radar Tokyo si frais, sinon garde locale.
+    /// Le KILL local reste pris en compte en OR (deux radars valent mieux qu'un).
+    fn guard_now(&self) -> GuardState {
+        let now_ms = Utc::now().timestamp_millis() as u64;
+        if let Some(r) = &self.remote {
+            if let Ok(g) = r.read() {
+                let gs = g.as_guard_state(now_ms);
+                if gs.is_fresh(now_ms, self.cfg.remote_max_age_ms) {
+                    let mut gs = gs;
+                    gs.kill = gs.kill || self.guard.state().kill;
+                    return gs;
+                }
+            }
+        }
+        self.guard.state()
+    }
+
     /// Boucle lente (2 Hz) : rollover marché, strike, résolution, entrée, dashboard.
     async fn housekeeping(&mut self) {
         let now_ms = Utc::now().timestamp_millis();
@@ -192,7 +238,7 @@ impl Grinder {
                         self.phase = Phase::Scanning;
                     }
                     _ if now_ms >= pos.end_ms + 90_000 => {
-                        let up_won = self.guard.state().spot > pos.strike;
+                        let up_won = self.guard_now().spot > pos.strike;
                         tracing::warn!("bougie Binance indisponible après 90 s — fallback micro-price");
                         self.spawn_reconcile(&pos, up_won);
                         self.resolve(&pos, up_won, "resolution_proxy").await;
@@ -216,7 +262,7 @@ impl Grinder {
         // est mort — ce chemin-ci est cadencé par le housekeeping 2 Hz).
         if self.cfg.guard_stale_exit_s > 0 {
             if let Phase::InPosition(pos) = &self.phase {
-                let gs = self.guard.state();
+                let gs = self.guard_now();
                 let max_age_ms = (self.cfg.guard_stale_exit_s * 1000) as u64;
                 if now_ms < pos.end_ms && !gs.is_fresh(now_ms as u64, max_age_ms) {
                     let pos = pos.clone();
@@ -280,7 +326,7 @@ impl Grinder {
             self.block("HALTED après wipe — relance manuelle requise (state.halted)").await;
             return;
         }
-        let gs = self.guard.state();
+        let gs = self.guard_now();
         let now_ms = Utc::now().timestamp_millis() as u64;
         let Some(market) = self.market.clone() else { return };
         let Some(strike) = self.strike else {
@@ -478,7 +524,7 @@ impl Grinder {
     /// Clôture à l'échéance. `up_won` vient du verdict officiel Gamma (ou du
     /// proxy Binance en fallback — `reason` distingue les deux dans le ledger).
     async fn resolve(&mut self, pos: &Position, up_won: bool, reason: &str) {
-        let gs = self.guard.state();
+        let gs = self.guard_now();
         let won = up_won == pos.side_up;
         let proceeds = if won { pos.shares + pos.cash_left } else { pos.cash_left };
         if won {
@@ -656,7 +702,7 @@ impl Grinder {
     }
 
     async fn publish_dash(&self, now_ms: u64) {
-        let gs = self.guard.state();
+        let gs = self.guard_now();
         let mut d = self.dash.write().await;
         d.binance_connected = gs.is_fresh(now_ms, self.cfg.guard_max_age_ms);
         d.spot = gs.spot;
