@@ -538,6 +538,22 @@ impl Grinder {
         }
         self.st.best_stack = self.st.best_stack.max(self.st.stack);
 
+        // Cap Kelly PAPER : wallet virtuel = PAPER_WALLET0 + PnL réalisé.
+        // Même mécanique que le live, base simulée.
+        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.mode != "live" {
+            let wallet = self.cfg.paper_wallet0 + self.st.realized_pnl;
+            let cap = self.cfg.stack_cap_fraction * wallet;
+            if wallet > 0.0 && self.st.stack > cap {
+                let skim = self.st.stack - cap;
+                self.st.banked += skim;
+                self.st.stack = cap;
+                tracing::info!(
+                    skim, cap, banked = self.st.banked, wallet,
+                    "cap Kelly (paper) : excédent écrémé"
+                );
+            }
+        }
+
         // Cap Kelly (live) : le stack ne dépasse jamais STACK_CAP_FRACTION du
         // collatéral wallet réel ; l'excédent est écrémé (il reste au wallet,
         // simplement retiré de la table de jeu — compté dans `banked`).

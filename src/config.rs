@@ -58,10 +58,12 @@ pub struct Config {
     /// Coupe-circuit : un wipe total à résolution (ou récupération < 1 $) gèle
     /// définitivement les entrées jusqu'à intervention humaine (état persistant).
     pub halt_on_wipe: bool,
-    /// Cap Kelly (live uniquement) : le stack ne dépasse jamais cette fraction
-    /// du collatéral wallet ; l'excédent est écrémé (reste au wallet, compté
-    /// dans `banked`). 0 = désactivé (défaut — paper reste exponentiel pur).
+    /// Cap Kelly : le stack ne dépasse jamais cette fraction du wallet —
+    /// collatéral réel en live, wallet virtuel (PAPER_WALLET0 + PnL réalisé)
+    /// en paper. L'excédent est écrémé dans `banked`. 0 = désactivé (défaut).
     pub stack_cap_fraction: f64,
+    /// Wallet virtuel de départ du paper (base du cap Kelly en simulation).
+    pub paper_wallet0: f64,
 
     // --- Actif ---
     /// Préfixe de slug Polymarket ("btc" → btc-updown-5m-<ts>, "eth", …).
@@ -134,6 +136,7 @@ impl Config {
                 .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
                 .unwrap_or(false),
             stack_cap_fraction: f("STACK_CAP_FRACTION", 0.0),
+            paper_wallet0: f("PAPER_WALLET0", 32.0),
         }
     }
 
@@ -171,6 +174,7 @@ impl Config {
             mode: "paper".into(),
             halt_on_wipe: false,
             stack_cap_fraction: 0.0,
+            paper_wallet0: 32.0,
         }
     }
 }
