@@ -80,6 +80,9 @@ pub struct Grinder {
     /// Exécuteur live (None = paper). Compilé uniquement avec --features live.
     #[cfg(feature = "live")]
     live: Option<LiveExec>,
+    /// Levé par la tâche de réconciliation si le verdict officiel contredit
+    /// notre résolution kline → halt au prochain housekeeping.
+    reconcile_halt: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub async fn run(
@@ -141,6 +144,7 @@ pub async fn run(
         last_played_window: 0,
         #[cfg(feature = "live")]
         live,
+        reconcile_halt: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         cfg,
     };
 
@@ -170,28 +174,41 @@ impl Grinder {
     async fn housekeeping(&mut self) {
         let now_ms = Utc::now().timestamp_millis();
 
-        // 1. Résolution d'une position arrivée à échéance — par le verdict
-        // OFFICIEL Polymarket (Gamma), le proxy Binance n'est qu'un fallback
-        // après 90 s (leçon 16 juil. : fausse défaite à 12 $ du strike).
+        // 1. Résolution d'une position arrivée à échéance.
+        // Le verdict officiel Gamma met PLUSIEURS MINUTES à se publier (mesuré
+        // 16 juil.) : trop lent pour le compoundage. On résout donc sur la
+        // CLÔTURE de la bougie Binance 5m (même source que le strike, finale
+        // quelques secondes après l'échéance), puis une réconciliation
+        // asynchrone compare au verdict officiel et déclenche un HALT en cas
+        // de divergence (plutôt que de composer sur une base fausse).
         if let Phase::InPosition(pos) = &self.phase {
-            if now_ms >= pos.end_ms {
+            if now_ms >= pos.end_ms + 3_000 {
                 let pos = pos.clone();
-                match self.client.get_official_up_won(&pos.slug).await {
-                    Ok(Some(up_won)) => {
-                        self.resolve(&pos, up_won, "resolution").await;
+                match crate::connectors::binance::price_at_window_close(pos.window_ts).await {
+                    Ok(Some(close)) => {
+                        let up_won = close > pos.strike;
+                        self.spawn_reconcile(&pos, up_won);
+                        self.resolve(&pos, up_won, "resolution_kline").await;
                         self.phase = Phase::Scanning;
                     }
                     _ if now_ms >= pos.end_ms + 90_000 => {
                         let up_won = self.guard.state().spot > pos.strike;
-                        tracing::warn!(
-                            "verdict officiel indisponible après 90 s — fallback proxy Binance"
-                        );
+                        tracing::warn!("bougie Binance indisponible après 90 s — fallback micro-price");
+                        self.spawn_reconcile(&pos, up_won);
                         self.resolve(&pos, up_won, "resolution_proxy").await;
                         self.phase = Phase::Scanning;
                     }
-                    _ => {} // verdict pas encore publié : on réessaie au prochain tick
+                    _ => {} // bougie pas encore close : on réessaie au prochain tick
                 }
             }
+        }
+
+        // 1ter. Une réconciliation a détecté une divergence avec le verdict
+        // officiel : on gèle tout, la comptabilité doit être reprise à la main.
+        if self.reconcile_halt.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.st.halted = true;
+            let _ = state::save(&self.cfg.state_path, &self.st);
+            tracing::error!("🛑 HALT : divergence résolution kline vs verdict officiel Polymarket");
         }
 
         // 1bis. Garde aveugle : flux Binance mort EN POSITION → sortie de
@@ -430,6 +447,34 @@ impl Grinder {
         self.settle(pos, "panic", reason, proceeds, fill.fees, z, gs).await;
     }
 
+    /// Vérifie EN ARRIÈRE-PLAN que le verdict officiel Polymarket (publié avec
+    /// plusieurs minutes de retard) confirme notre résolution kline. Divergence
+    /// → flag partagé → halt (on ne compose pas sur une base fausse).
+    fn spawn_reconcile(&self, pos: &Position, booked_up_won: bool) {
+        let client = self.client.clone();
+        let slug = pos.slug.clone();
+        let flag = self.reconcile_halt.clone();
+        tokio::spawn(async move {
+            for _ in 0..40 {
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                match client.get_official_up_won(&slug).await {
+                    Ok(Some(official_up)) => {
+                        if official_up != booked_up_won {
+                            tracing::error!(
+                                %slug, booked_up_won, official_up,
+                                "⚠️ verdict officiel ≠ résolution comptabilisée — HALT demandé"
+                            );
+                            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        return;
+                    }
+                    _ => continue,
+                }
+            }
+            tracing::warn!(%slug, "réconciliation : verdict officiel non publié en 10 min");
+        });
+    }
+
     /// Clôture à l'échéance. `up_won` vient du verdict officiel Gamma (ou du
     /// proxy Binance en fallback — `reason` distingue les deux dans le ledger).
     async fn resolve(&mut self, pos: &Position, up_won: bool, reason: &str) {
@@ -501,7 +546,11 @@ impl Grinder {
             if let Some(l) = &self.live {
                 match l.collateral().await {
                     Ok(c) if c > 0.0 => {
-                        let cap = self.cfg.stack_cap_fraction * c;
+                        // Le collatéral lu peut ne pas encore inclure le produit
+                        // de la fenêtre qui vient de se clore (redemption ~30-60 s) :
+                        // on l'ajoute pour évaluer le wallet COMPLET (sur-écrémage
+                        // du 16 juil. 12:56 : cap calculé sur 29 $ au lieu de 41 $).
+                        let cap = self.cfg.stack_cap_fraction * (c + proceeds);
                         if self.st.stack > cap {
                             let skim = self.st.stack - cap;
                             self.st.banked += skim;

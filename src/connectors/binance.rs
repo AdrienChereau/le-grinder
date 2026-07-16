@@ -73,6 +73,32 @@ pub async fn price_at_window_open(window_ts: i64) -> anyhow::Result<f64> {
     Ok(open)
 }
 
+/// Clôture de la bougie 5m d'une fenêtre — proxy de résolution (leçon 16 juil. :
+/// le micro-price instantané s'écartait de 28 $ de la clôture réelle, et le
+/// verdict officiel Gamma met plusieurs minutes à se publier).
+/// `None` si la bougie n'est pas encore terminée côté Binance.
+pub async fn price_at_window_close(window_ts: i64) -> anyhow::Result<Option<f64>> {
+    let url = format!(
+        "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&startTime={}&limit=1",
+        window_ts * 1000
+    );
+    let arr: Vec<Vec<serde_json::Value>> = reqwest::Client::new()
+        .get(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let Some(k) = arr.first() else { return Ok(None) };
+    // k[6] = closeTime ms : la bougie doit être terminée pour que close soit final.
+    let close_time = k.get(6).and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
+    if chrono::Utc::now().timestamp_millis() < close_time {
+        return Ok(None);
+    }
+    Ok(k.get(4).and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()))
+}
+
 /// Boucle de connexion résiliente. Ne retourne jamais en fonctionnement normal :
 /// en cas de coupure, reconnecte avec backoff exponentiel borné.
 pub async fn run(url: String, tx: watch::Sender<Option<BookUpdate>>) -> anyhow::Result<()> {
