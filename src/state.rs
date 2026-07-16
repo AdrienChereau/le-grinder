@@ -36,6 +36,10 @@ pub struct GrinderState {
     /// n'a pas remis ce flag à false dans le fichier d'état. Survit aux restarts.
     #[serde(default)]
     pub halted: bool,
+    /// Cumul écrémé par le cap Kelly (STACK_CAP_FRACTION) : profits retirés de
+    /// la table de jeu, restés au wallet, intouchables par un wipe.
+    #[serde(default)]
+    pub banked: f64,
 }
 
 impl GrinderState {
@@ -52,6 +56,7 @@ impl GrinderState {
             panic_exits: 0,
             realized_pnl: 0.0,
             halted: false,
+            banked: 0.0,
         }
     }
 }

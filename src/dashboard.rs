@@ -48,6 +48,7 @@ pub struct DashState {
     pub last_block_reason: String,
     pub mode: String,        // "paper" | "live" | "live (dry-run)"
     pub live_collateral: f64, // USDC réel du wallet (0 en paper)
+    pub banked: f64,          // cumul écrémé par le cap Kelly (0 si désactivé)
     // Position ouverte (zéros si aucune)
     pub pos_side: String,
     pub pos_shares: f64,

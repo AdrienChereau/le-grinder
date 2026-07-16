@@ -493,6 +493,31 @@ impl Grinder {
         }
         self.st.best_stack = self.st.best_stack.max(self.st.stack);
 
+        // Cap Kelly (live) : le stack ne dépasse jamais STACK_CAP_FRACTION du
+        // collatéral wallet réel ; l'excédent est écrémé (il reste au wallet,
+        // simplement retiré de la table de jeu — compté dans `banked`).
+        #[cfg(feature = "live")]
+        if self.cfg.stack_cap_fraction > 0.0 {
+            if let Some(l) = &self.live {
+                match l.collateral().await {
+                    Ok(c) if c > 0.0 => {
+                        let cap = self.cfg.stack_cap_fraction * c;
+                        if self.st.stack > cap {
+                            let skim = self.st.stack - cap;
+                            self.st.banked += skim;
+                            self.st.stack = cap;
+                            tracing::info!(
+                                skim, cap, banked = self.st.banked, collateral = c,
+                                "cap Kelly : excédent écrémé vers le wallet"
+                            );
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "cap Kelly : collatéral illisible, pas d'écrémage ce tour"),
+                }
+            }
+        }
+
         let rec = WindowRecord {
             ts: Utc::now().to_rfc3339(),
             window_ts: pos.window_ts,
@@ -632,4 +657,5 @@ fn apply_state(d: &mut crate::dashboard::DashState, st: &GrinderState) {
     d.losses = st.losses;
     d.panic_exits = st.panic_exits;
     d.realized_pnl = st.realized_pnl;
+    d.banked = st.banked;
 }

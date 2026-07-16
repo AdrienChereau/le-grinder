@@ -58,6 +58,10 @@ pub struct Config {
     /// Coupe-circuit : un wipe total à résolution (ou récupération < 1 $) gèle
     /// définitivement les entrées jusqu'à intervention humaine (état persistant).
     pub halt_on_wipe: bool,
+    /// Cap Kelly (live uniquement) : le stack ne dépasse jamais cette fraction
+    /// du collatéral wallet ; l'excédent est écrémé (reste au wallet, compté
+    /// dans `banked`). 0 = désactivé (défaut — paper reste exponentiel pur).
+    pub stack_cap_fraction: f64,
 
     // --- Infra ---
     pub binance_ws_url: String,
@@ -118,6 +122,7 @@ impl Config {
             halt_on_wipe: env::var("HALT_ON_WIPE")
                 .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
                 .unwrap_or(false),
+            stack_cap_fraction: f("STACK_CAP_FRACTION", 0.0),
         }
     }
 
@@ -152,6 +157,7 @@ impl Config {
             windows_path: "/tmp/grinder_windows_test.jsonl".into(),
             mode: "paper".into(),
             halt_on_wipe: false,
+            stack_cap_fraction: 0.0,
         }
     }
 }

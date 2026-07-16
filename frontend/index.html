@@ -39,6 +39,7 @@
     <div class="kv"><span>Meilleure série</span><b id="best_streak">–</b></div>
     <div class="kv"><span>PnL réalisé</span><b id="pnl">–</b></div>
     <div class="kv"><span>Wallet USDC (live)</span><b id="live_collateral">–</b></div>
+    <div class="kv"><span>Écrémé (Kelly)</span><b id="banked" class="green">–</b></div>
   </div>
   <div class="card">
     <h2>Fenêtre</h2>
@@ -95,6 +96,7 @@ async function tick() {
   m.style.background = s.mode === 'live' ? 'var(--red)' : 'var(--amber)';
   m.style.color = s.mode === 'live' ? '#fff' : '#000';
   $('live_collateral').textContent = s.live_collateral ? usd(s.live_collateral) : '–';
+  $('banked').textContent = s.banked ? usd(s.banked) : '–';
   $('stack').textContent = usd(s.stack);
   $('streak').textContent = s.streak;
   $('run').textContent = s.run_id;
