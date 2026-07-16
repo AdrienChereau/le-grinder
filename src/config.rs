@@ -63,6 +63,12 @@ pub struct Config {
     /// dans `banked`). 0 = désactivé (défaut — paper reste exponentiel pur).
     pub stack_cap_fraction: f64,
 
+    // --- Actif ---
+    /// Préfixe de slug Polymarket ("btc" → btc-updown-5m-<ts>, "eth", …).
+    pub asset: String,
+    /// Symbole Binance pour le strike/la clôture (BTCUSDT, ETHUSDT, …).
+    pub binance_symbol: String,
+
     // --- Infra ---
     pub binance_ws_url: String,
     pub dashboard_bind: String,
@@ -85,6 +91,12 @@ impl Config {
     pub fn from_env() -> Self {
         let mode = s("TRADING_MODE", "paper").to_lowercase();
         let live = mode == "live";
+        let asset = s("ASSET", "btc").to_lowercase();
+        let binance_symbol = s("BINANCE_SYMBOL", &format!("{}USDT", asset.to_uppercase()));
+        let default_ws = format!(
+            "wss://stream.binance.com:9443/ws/{}@depth20@100ms",
+            binance_symbol.to_lowercase()
+        );
         Self {
             grind_base: f("GRIND_BASE", 1.0),
             entry_min: f("ENTRY_MIN", 0.95),
@@ -108,10 +120,9 @@ impl Config {
             velocity_threshold: f("VELOCITY_THRESHOLD", 45.0),
             kill_latch_ms: i("KILL_LATCH_MS", 5_000) as u64,
             guard_max_age_ms: i("GUARD_MAX_AGE_MS", 3_000) as u64,
-            binance_ws_url: s(
-                "BINANCE_WS_URL",
-                "wss://stream.binance.com:9443/ws/btcusdt@depth20@100ms",
-            ),
+            binance_ws_url: s("BINANCE_WS_URL", &default_ws),
+            asset,
+            binance_symbol,
             // 0.0.0.0 : dashboards consultés via Tailscale (doctrine infra).
             dashboard_bind: s("DASH_BIND", "0.0.0.0"),
             dashboard_port: i("DASH_PORT", 8095) as u16,
@@ -151,6 +162,8 @@ impl Config {
             kill_latch_ms: 5_000,
             guard_max_age_ms: 3_000,
             binance_ws_url: String::new(),
+            asset: "btc".into(),
+            binance_symbol: "BTCUSDT".into(),
             dashboard_bind: "127.0.0.1".into(),
             dashboard_port: 0,
             state_path: "/tmp/grinder_state_test.json".into(),

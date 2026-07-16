@@ -97,11 +97,12 @@ impl PolymarketClient {
         (now / WINDOW_SEC) * WINDOW_SEC
     }
 
-    /// Résout le marché BTC 5 min actif (fenêtre courante puis suivante).
-    pub async fn get_current_btc_5m_market(&self) -> anyhow::Result<Option<Market>> {
+    /// Résout le marché Up/Down 5 min actif d'un actif ("btc", "eth", …)
+    /// — fenêtre courante puis suivante.
+    pub async fn get_current_5m_market(&self, asset: &str) -> anyhow::Result<Option<Market>> {
         let base = Self::current_window();
         for window_ts in [base, base + WINDOW_SEC] {
-            let slug = format!("btc-updown-5m-{window_ts}");
+            let slug = format!("{asset}-updown-5m-{window_ts}");
             match self.fetch_market(&slug, window_ts).await {
                 Ok(Some(m)) if m.time_remaining_sec() > 0 => return Ok(Some(m)),
                 Ok(_) => continue,

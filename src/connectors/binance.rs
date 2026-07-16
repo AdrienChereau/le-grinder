@@ -51,9 +51,9 @@ impl PartialDepth {
 
 /// Prix d'ouverture BTC à `window_ts` (kline 1m) — proxy du strike de référence
 /// (la résolution officielle est Chainlink, mais l'open Binance en est très proche).
-pub async fn price_at_window_open(window_ts: i64) -> anyhow::Result<f64> {
+pub async fn price_at_window_open(symbol: &str, window_ts: i64) -> anyhow::Result<f64> {
     let url = format!(
-        "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime={}&limit=1",
+        "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1m&startTime={}&limit=1",
         window_ts * 1000
     );
     let arr: Vec<Vec<serde_json::Value>> = reqwest::Client::new()
@@ -77,9 +77,9 @@ pub async fn price_at_window_open(window_ts: i64) -> anyhow::Result<f64> {
 /// le micro-price instantané s'écartait de 28 $ de la clôture réelle, et le
 /// verdict officiel Gamma met plusieurs minutes à se publier).
 /// `None` si la bougie n'est pas encore terminée côté Binance.
-pub async fn price_at_window_close(window_ts: i64) -> anyhow::Result<Option<f64>> {
+pub async fn price_at_window_close(symbol: &str, window_ts: i64) -> anyhow::Result<Option<f64>> {
     let url = format!(
-        "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&startTime={}&limit=1",
+        "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&startTime={}&limit=1",
         window_ts * 1000
     );
     let arr: Vec<Vec<serde_json::Value>> = reqwest::Client::new()

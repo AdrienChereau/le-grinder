@@ -184,7 +184,7 @@ impl Grinder {
         if let Phase::InPosition(pos) = &self.phase {
             if now_ms >= pos.end_ms + 3_000 {
                 let pos = pos.clone();
-                match crate::connectors::binance::price_at_window_close(pos.window_ts).await {
+                match crate::connectors::binance::price_at_window_close(&self.cfg.binance_symbol, pos.window_ts).await {
                     Ok(Some(close)) => {
                         let up_won = close > pos.strike;
                         self.spawn_reconcile(&pos, up_won);
@@ -235,7 +235,7 @@ impl Grinder {
             Some(m) => m.time_remaining_sec() <= 0,
         };
         if need_market {
-            match self.client.get_current_btc_5m_market().await {
+            match self.client.get_current_5m_market(&self.cfg.asset).await {
                 Ok(Some(m)) => {
                     tracing::info!(slug = %m.slug, "nouvelle fenêtre");
                     let _ = self
@@ -254,7 +254,7 @@ impl Grinder {
             if let Some(m) = &self.market {
                 // L'open n'existe qu'une fois la fenêtre démarrée.
                 if Utc::now().timestamp() >= m.window_ts {
-                    match price_at_window_open(m.window_ts).await {
+                    match price_at_window_open(&self.cfg.binance_symbol, m.window_ts).await {
                         Ok(px) => {
                             tracing::info!(strike = px, window = m.window_ts, "strike fixé");
                             self.strike = Some(px);
