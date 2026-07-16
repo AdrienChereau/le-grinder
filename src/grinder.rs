@@ -200,20 +200,26 @@ pub async fn run(
 
 impl Grinder {
     /// État de garde courant : radar Tokyo si frais, sinon garde locale.
-    /// Le KILL local reste pris en compte en OR (deux radars valent mieux qu'un).
+    /// HYBRIDE (16 juil.) : le radar fournit spot/drift/KILL/vélocité (fraîcheur
+    /// ~35 ms), mais le SIGMA reste celui de l'estimateur LOCAL — c'est sur lui
+    /// que z_entry/z_exit sont calibrés (le radar monolith tourne avec un
+    /// plancher 0,80 : l'utiliser divisait nos z par ~2,7 → live frileux à
+    /// l'entrée et paniquard en position). KILL local en OR.
     fn guard_now(&self) -> GuardState {
         let now_ms = Utc::now().timestamp_millis() as u64;
+        let local = self.guard.state();
         if let Some(r) = &self.remote {
             if let Ok(g) = r.read() {
                 let gs = g.as_guard_state(now_ms);
                 if gs.is_fresh(now_ms, self.cfg.remote_max_age_ms) {
                     let mut gs = gs;
-                    gs.kill = gs.kill || self.guard.state().kill;
+                    gs.sigma = local.sigma; // calibration z = estimateur local
+                    gs.kill = gs.kill || local.kill;
                     return gs;
                 }
             }
         }
-        self.guard.state()
+        local
     }
 
     /// Boucle lente (2 Hz) : rollover marché, strike, résolution, entrée, dashboard.
