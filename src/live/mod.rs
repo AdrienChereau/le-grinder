@@ -130,6 +130,10 @@ impl LiveExec {
     }
 
     pub async fn collateral(&self) -> anyhow::Result<f64> {
+        // Le CLOB sert une valeur EN CACHE : sans refresh explicite, la lecture
+        // reste figée sur un vieux snapshot (constaté 17 juil. : 32,46 affiché
+        // pour 45 réels). Même famille de piège que l'allowance CONDITIONAL.
+        let _ = auth::sync_balance_allowance(&self.creds, "COLLATERAL", None).await;
         auth::get_collateral_balance(&self.creds).await
     }
 }
