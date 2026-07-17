@@ -25,6 +25,7 @@ pub struct RemoteState {
     pub spot: f64,
     pub sigma: f64,
     pub drift: f64,
+    pub ofi: f64,
     pub obi: f64,
     pub velocity: f64,
     pub impulse: f64,
@@ -48,7 +49,7 @@ impl RemoteState {
     }
 }
 
-fn decode_wiretick(b: &[u8]) -> Option<[f64; 8]> {
+fn decode_wiretick(b: &[u8]) -> Option<[f64; 9]> {
     if b.len() < 65 || b[0] != 0x54 {
         return None;
     }
@@ -67,7 +68,8 @@ fn decode_wiretick(b: &[u8]) -> Option<[f64; 8]> {
         f64::from_bits(w[2]),  // spot
         f64::from_bits(w[3]),  // sigma
         f64::from_bits(w[4]),  // drift
-        f64::from_bits(w[6]),  // obi (w[5]=ofi, non utilisé par la garde)
+        f64::from_bits(w[5]),  // ofi
+        f64::from_bits(w[6]),  // obi
         f64::from_bits(w[7]),  // velocity
         impulse,
     ])
@@ -107,9 +109,10 @@ pub fn spawn(listen: String, kill_latch_ms: u64) -> (RemoteShared, watch::Receiv
                         g.spot = v[2];
                         g.sigma = v[3];
                         g.drift = v[4];
-                        g.obi = v[5];
-                        g.velocity = v[6];
-                        g.impulse = v[7];
+                        g.ofi = v[5];
+                        g.obi = v[6];
+                        g.velocity = v[7];
+                        g.impulse = v[8];
                         drop(g);
                         let _ = tx.send(now_ms);
                     }
@@ -163,11 +166,12 @@ mod tests {
         assert_eq!(v[0] as u64, 42);
         assert!((v[2] - 64000.5).abs() < 1e-9);
         assert!((v[4] + 1.2e-5).abs() < 1e-12);
-        assert!((v[5] + 0.3).abs() < 1e-9, "obi");
-        assert!((v[7] - 4.2e-4).abs() < 1e-12, "impulse");
+        assert!((v[5] - 0.5).abs() < 1e-9, "ofi");
+        assert!((v[6] + 0.3).abs() < 1e-9, "obi");
+        assert!((v[8] - 4.2e-4).abs() < 1e-12, "impulse");
         // trame courte 65 o (ancien radar) : impulse = 0
         let v = decode_wiretick(&b[..65]).expect("65 o");
-        assert_eq!(v[7], 0.0);
+        assert_eq!(v[8], 0.0);
         // invalides
         assert!(decode_wiretick(&b[..64]).is_none());
         let mut bad = b;

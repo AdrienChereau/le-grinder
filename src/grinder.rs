@@ -86,6 +86,8 @@ pub struct Grinder {
     reconcile_halt: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Flux radar Tokyo distant (None = garde locale seule).
     remote: Option<RemoteShared>,
+    /// Enregistreur des ticks radar EN POSITION (dataset classifieur mèche/crash).
+    tick_file: Option<std::fs::File>,
 }
 
 pub async fn run(
@@ -166,6 +168,7 @@ pub async fn run(
         live,
         reconcile_halt: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         remote,
+        tick_file: None,
         cfg,
     };
 
@@ -187,6 +190,7 @@ pub async fn run(
             changed = remote_rx.changed() => {
                 // Tick radar Tokyo (10 Hz) : même chemin chaud que Binance local.
                 if changed.is_ok() {
+                    g.record_tick();
                     let gs = g.guard_now();
                     g.check_exits(gs).await;
                 }
@@ -199,6 +203,32 @@ pub async fn run(
 }
 
 impl Grinder {
+    /// Enregistre le tick radar courant si une position est ouverte — dataset
+    /// du futur classifieur mèche vs crash (OFI/impulse au moment critique).
+    /// Volume : ~10 Hz × temps en position ≈ 20-30 Mo/jour, en position SEULEMENT.
+    fn record_tick(&mut self) {
+        let Phase::InPosition(pos) = &self.phase else { return };
+        let Some(r) = &self.remote else { return };
+        let Ok(t) = r.read() else { return };
+        if self.tick_file.is_none() {
+            self.tick_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("data/radar_ticks.jsonl")
+                .map_err(|e| tracing::warn!(error = %e, "ouverture radar_ticks impossible"))
+                .ok();
+        }
+        if let Some(f) = &mut self.tick_file {
+            use std::io::Write as _;
+            let line = format!(
+                "{{\"t\":{},\"w\":{},\"side\":\"{}\",\"spot\":{:.2},\"sig\":{:.4},\"dr\":{:.3e},\"ofi\":{:.4},\"obi\":{:.4},\"vel\":{:.2},\"imp\":{:.3e},\"kill\":{}}}\n",
+                t.ts_ms_local, pos.window_ts, pos.side_str(), t.spot, t.sigma, t.drift,
+                t.ofi, t.obi, t.velocity, t.impulse, t.ts_ms_local < t.kill_until_ms
+            );
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+
     /// État de garde courant : radar Tokyo si frais, sinon garde locale.
     /// HYBRIDE (16 juil.) : le radar fournit spot/drift/KILL/vélocité (fraîcheur
     /// ~35 ms), mais le SIGMA reste celui de l'estimateur LOCAL — c'est sur lui
