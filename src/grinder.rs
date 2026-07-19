@@ -90,6 +90,11 @@ pub struct Grinder {
     remote: Option<RemoteShared>,
     /// Enregistreur des ticks radar EN POSITION (dataset classifieur mèche/crash).
     tick_file: Option<std::fs::File>,
+    /// 3 dernières évaluations du wallet total (collatéral lu + produit de la
+    /// fenêtre close) : le cap Kelly prend le MAX — les redemptions mettent
+    /// 30-60 s à créditer et une lecture instantanée sous-évalue le wallet
+    /// (sur-écrémage du 19 juil. : lu 36 $, réel 46 $).
+    wallet_evals: std::collections::VecDeque<f64>,
 }
 
 pub async fn run(
@@ -171,6 +176,7 @@ pub async fn run(
         reconcile_halt: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         remote,
         tick_file: None,
+        wallet_evals: std::collections::VecDeque::with_capacity(3),
         cfg,
     };
 
@@ -680,11 +686,17 @@ impl Grinder {
             if let Some(l) = &self.live {
                 match l.collateral().await {
                     Ok(c) if c > 0.0 => {
-                        // Le collatéral lu peut ne pas encore inclure le produit
-                        // de la fenêtre qui vient de se clore (redemption ~30-60 s) :
-                        // on l'ajoute pour évaluer le wallet COMPLET (sur-écrémage
-                        // du 16 juil. 12:56 : cap calculé sur 29 $ au lieu de 41 $).
-                        let cap = self.cfg.stack_cap_fraction * (c + proceeds);
+                        // Wallet total = max glissant des 3 dernières évaluations
+                        // (collatéral lu + produit de la fenêtre close) : les
+                        // redemptions en vol font sous-évaluer toute lecture
+                        // instantanée (19 juil. : lu 36 $, réel 46 $).
+                        self.wallet_evals.push_back(c + proceeds);
+                        if self.wallet_evals.len() > 3 {
+                            self.wallet_evals.pop_front();
+                        }
+                        let wallet = self.wallet_evals.iter().cloned().fold(0.0_f64, f64::max);
+                        self.dash.write().await.live_collateral = wallet;
+                        let cap = self.cfg.stack_cap_fraction * wallet;
                         if self.st.stack > cap {
                             let skim = self.st.stack - cap;
                             self.st.banked += skim;
