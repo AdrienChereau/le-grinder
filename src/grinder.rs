@@ -95,6 +95,9 @@ pub struct Grinder {
     /// 30-60 s à créditer et une lecture instantanée sous-évalue le wallet
     /// (sur-écrémage du 19 juil. : lu 36 $, réel 46 $).
     wallet_evals: std::collections::VecDeque<f64>,
+    /// Wallet lu en continu par le poller (max glissant 90 s), 0.0 tant que
+    /// rien n'a été lu. Alimente le dashboard et le cap Kelly entre les settles.
+    wallet_live: std::sync::Arc<std::sync::RwLock<f64>>,
 }
 
 pub async fn run(
@@ -160,6 +163,38 @@ pub async fn run(
         d.stack = st.stack;
     }
 
+    let wallet_live = std::sync::Arc::new(std::sync::RwLock::new(0.0_f64));
+    #[cfg(feature = "live")]
+    if let Some(l) = &live {
+        // Poller wallet : lecture CLOB ~10 s, max glissant 90 s (redemptions en
+        // vol), publication continue au dashboard (leçon monolith : sync ≤10 s).
+        let creds = l.creds.clone();
+        let shared = wallet_live.clone();
+        let dash2 = dash.clone();
+        tokio::spawn(async move {
+            let mut window = std::collections::VecDeque::with_capacity(9);
+            let mut tick = tokio::time::interval(Duration::from_secs(10));
+            loop {
+                tick.tick().await;
+                match crate::live::auth::get_collateral_balance(&creds).await {
+                    Ok(c) if c > 0.0 => {
+                        window.push_back(c);
+                        if window.len() > 9 {
+                            window.pop_front();
+                        }
+                        let m = window.iter().cloned().fold(0.0_f64, f64::max);
+                        if let Ok(mut w) = shared.write() {
+                            *w = m;
+                        }
+                        dash2.write().await.live_collateral = m;
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::debug!(error = %e, "poller wallet : lecture échouée"),
+                }
+            }
+        });
+    }
+
     let mut g = Grinder {
         guard: TokyoGuard::new(&cfg),
         client: PolymarketClient::new(),
@@ -177,6 +212,7 @@ pub async fn run(
         remote,
         tick_file: None,
         wallet_evals: std::collections::VecDeque::with_capacity(3),
+        wallet_live,
         cfg,
     };
 
@@ -694,7 +730,8 @@ impl Grinder {
                         if self.wallet_evals.len() > 3 {
                             self.wallet_evals.pop_front();
                         }
-                        let wallet = self.wallet_evals.iter().cloned().fold(0.0_f64, f64::max);
+                        let polled = self.wallet_live.read().map(|w| *w).unwrap_or(0.0);
+                        let wallet = self.wallet_evals.iter().cloned().fold(polled, f64::max);
                         self.dash.write().await.live_collateral = wallet;
                         let cap = self.cfg.stack_cap_fraction * wallet;
                         if self.st.stack > cap {
