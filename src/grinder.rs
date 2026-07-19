@@ -47,6 +47,8 @@ struct Position {
     slug: String,
     strike: f64,
     end_ms: i64,
+    /// Point de non-retour franchi : plus aucune vente, on va à la résolution.
+    ride: bool,
 }
 
 impl Position {
@@ -300,7 +302,7 @@ impl Grinder {
             if let Phase::InPosition(pos) = &self.phase {
                 let gs = self.guard_now();
                 let max_age_ms = (self.cfg.guard_stale_exit_s * 1000) as u64;
-                if now_ms < pos.end_ms && !gs.is_fresh(now_ms as u64, max_age_ms) {
+                if now_ms < pos.end_ms && !pos.ride && !gs.is_fresh(now_ms as u64, max_age_ms) {
                     let pos = pos.clone();
                     tracing::warn!("garde AVEUGLE (flux Binance périmé) — sortie de sécurité");
                     let remaining_s = ((pos.end_ms - now_ms) as f64 / 1000.0).max(0.0);
@@ -425,6 +427,7 @@ impl Grinder {
                 entry_price: fill.avg_price,
                 cash_left,
                 z_at_entry: z,
+                ride: false,
                 spot_at_entry: gs.spot,
                 sigma_at_entry: gs.sigma,
                 remaining_s_at_entry: remaining,
@@ -483,8 +486,26 @@ impl Grinder {
             None
         };
         let Some(reason) = reason else { return };
+        if pos.ride {
+            return; // point de non-retour déjà franchi : on tient jusqu'au bout
+        }
 
         let pos = pos.clone();
+        // Point de non-retour : sous PANIC_FLOOR, vendre ne récupère que des
+        // miettes — on préfère le wipe assumé avec chance de retournement.
+        if let Some(book) = self.best_book(&pos.token_id).await {
+            if book.best_bid().is_some_and(|b| b < self.cfg.panic_floor) {
+                tracing::warn!(
+                    reason, bid = book.best_bid(),
+                    "sous le point de non-retour ({}) — position tenue jusqu'à résolution",
+                    self.cfg.panic_floor
+                );
+                if let Phase::InPosition(p) = &mut self.phase {
+                    p.ride = true;
+                }
+                return;
+            }
+        }
         tracing::warn!(reason, z, drift = gs.drift, "VENTE CATASTROPHE");
         if self.panic_exit(&pos, reason, z, gs).await {
             self.phase = Phase::Scanning;

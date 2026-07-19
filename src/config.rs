@@ -26,6 +26,10 @@ pub struct Config {
     /// Flux Binance périmé > N s EN POSITION → sortie de sécurité (garde
     /// aveugle). 0 = désactivé (défaut).
     pub guard_stale_exit_s: i64,
+    /// Point de non-retour : si le meilleur bid de notre côté est SOUS ce prix,
+    /// on ne vend plus — la position court jusqu'à résolution (vendre à 10c ne
+    /// protège plus rien, autant espérer le retournement — consigne 19 juil.).
+    pub panic_floor: f64,
     /// On n'entre plus s'il reste moins que ça (secondes) — pas le temps de sortir.
     pub min_remaining_s: i64,
     /// On n'entre pas s'il reste plus que ça (le 95c trop tôt est suspect).
@@ -112,6 +116,7 @@ impl Config {
             drift_exit: f("DRIFT_EXIT", 3e-5),
             dist_exit_usd: f("DIST_EXIT_USD", 0.0),
             guard_stale_exit_s: i("GUARD_STALE_EXIT_S", 0),
+            panic_floor: f("PANIC_FLOOR", 0.10),
             min_remaining_s: i("MIN_REMAINING_S", 15),
             max_remaining_s: i("MAX_REMAINING_S", 240),
             panic_haircut: f("PANIC_HAIRCUT", 0.5),
@@ -157,6 +162,7 @@ impl Config {
             drift_exit: 3e-5,
             dist_exit_usd: 0.0,
             guard_stale_exit_s: 0,
+            panic_floor: 0.10,
             min_remaining_s: 15,
             max_remaining_s: 240,
             panic_haircut: 0.5,
