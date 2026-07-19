@@ -305,8 +305,9 @@ impl Grinder {
                     tracing::warn!("garde AVEUGLE (flux Binance périmé) — sortie de sécurité");
                     let remaining_s = ((pos.end_ms - now_ms) as f64 / 1000.0).max(0.0);
                     let z = gs.margin_z(pos.strike, pos.dir(), remaining_s);
-                    self.panic_exit(&pos, "guard_stale", z, gs).await;
-                    self.phase = Phase::Scanning;
+                    if self.panic_exit(&pos, "guard_stale", z, gs).await {
+                        self.phase = Phase::Scanning;
+                    }
                 }
             }
         }
@@ -459,6 +460,11 @@ impl Grinder {
         let remaining_s = ((pos.end_ms - now_ms) as f64 / 1000.0).max(0.0);
         let z = gs.margin_z(pos.strike, pos.dir(), remaining_s);
 
+        // Grâce post-entrée : les parts ne sont pas vendables on-chain avant
+        // ~2-3 s, et les mèches d'une seconde ne sont pas des crashs.
+        if now_ms - (pos.end_ms - pos.remaining_s_at_entry * 1000) < 3_000 {
+            return;
+        }
         let dist_usd = (gs.spot - pos.strike).abs();
         let reason = if gs.kill {
             Some("radar_kill")
@@ -480,8 +486,9 @@ impl Grinder {
 
         let pos = pos.clone();
         tracing::warn!(reason, z, drift = gs.drift, "VENTE CATASTROPHE");
-        self.panic_exit(&pos, reason, z, gs).await;
-        self.phase = Phase::Scanning;
+        if self.panic_exit(&pos, reason, z, gs).await {
+            self.phase = Phase::Scanning;
+        }
     }
 
     /// Achat : CLOB réel en live, sweep simulé en paper.
@@ -517,8 +524,15 @@ impl Grinder {
     }
 
     /// Vente catastrophe : balayage des bids avec haircut, le reste part à zéro.
-    async fn panic_exit(&mut self, pos: &Position, reason: &str, z: f64, gs: GuardState) {
+    /// Retourne `false` si RIEN n'a pu être vendu (parts pas encore on-chain,
+    /// carnet vide, ordre refusé) : la position reste OUVERTE — inscrire un wipe
+    /// serait fictif (leçon du 18 juil. 22:49 : halt fantôme, la fenêtre a gagné).
+    async fn panic_exit(&mut self, pos: &Position, reason: &str, z: f64, gs: GuardState) -> bool {
         let fill = self.exec_sell(&pos.token_id, pos.shares).await;
+        if fill.shares <= 0.0 && pos.shares > 0.0 {
+            tracing::warn!(reason, "vente catastrophe SANS AUCUN fill — position conservée, retry au prochain tick");
+            return false;
+        }
         let proceeds = (fill.notional - fill.fees).max(0.0) + pos.cash_left;
         let recovered_pct = if pos.cost > 0.0 { 100.0 * proceeds / pos.cost } else { 0.0 };
         tracing::warn!(
@@ -527,6 +541,7 @@ impl Grinder {
         );
         self.st.panic_exits += 1;
         self.settle(pos, "panic", reason, proceeds, fill.fees, z, gs).await;
+        true
     }
 
     /// Vérifie EN ARRIÈRE-PLAN que le verdict officiel Polymarket (publié avec
