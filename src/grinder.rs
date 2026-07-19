@@ -698,9 +698,18 @@ impl Grinder {
         }
         self.st.best_stack = self.st.best_stack.max(self.st.stack);
 
+        // Écrémage par gain (spécification Adrien) : 30 % de chaque gain de
+        // WIN part en réserve, 70 % compose. Prioritaire sur le cap dynamique.
+        if self.cfg.stack_skim_gain > 0.0 && outcome == "win" && pnl > 0.0 {
+            let skim = self.cfg.stack_skim_gain * pnl;
+            self.st.banked += skim;
+            self.st.stack -= skim;
+            tracing::info!(skim, gain = pnl, banked = self.st.banked, "écrémage 30% du gain");
+        }
+
         // Cap Kelly PAPER : wallet virtuel = PAPER_WALLET0 + PnL réalisé.
         // Même mécanique que le live, base simulée.
-        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.mode != "live" {
+        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.stack_skim_gain <= 0.0 && self.cfg.mode != "live" {
             let wallet = self.cfg.paper_wallet0 + self.st.realized_pnl;
             let cap = self.cfg.stack_cap_fraction * wallet;
             if wallet > 0.0 && self.st.stack > cap {
@@ -718,7 +727,7 @@ impl Grinder {
         // collatéral wallet réel ; l'excédent est écrémé (il reste au wallet,
         // simplement retiré de la table de jeu — compté dans `banked`).
         #[cfg(feature = "live")]
-        if self.cfg.stack_cap_fraction > 0.0 {
+        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.stack_skim_gain <= 0.0 {
             if let Some(l) = &self.live {
                 match l.collateral().await {
                     Ok(c) if c > 0.0 => {

@@ -68,6 +68,10 @@ pub struct Config {
     pub stack_cap_fraction: f64,
     /// Wallet virtuel de départ du paper (base du cap Kelly en simulation).
     pub paper_wallet0: f64,
+    /// Écrémage par gain (mode demandé par Adrien, 19 juil.) : à chaque WIN,
+    /// cette fraction du GAIN part en réserve, le reste compose. Remplace le
+    /// cap dynamique quand > 0. 0 = désactivé.
+    pub stack_skim_gain: f64,
     /// Adresse UDP d'écoute du flux radar Tokyo (WireTick). None = garde locale.
     pub signal_listen: Option<String>,
     /// Âge max du tick distant avant repli sur la garde locale (ms).
@@ -146,6 +150,7 @@ impl Config {
                 .unwrap_or(false),
             stack_cap_fraction: f("STACK_CAP_FRACTION", 0.0),
             paper_wallet0: f("PAPER_WALLET0", 32.0),
+            stack_skim_gain: f("STACK_SKIM_GAIN", 0.0),
             signal_listen: env::var("SIGNAL_LISTEN").ok().filter(|v| !v.trim().is_empty()),
             remote_max_age_ms: i("REMOTE_MAX_AGE_MS", 1_500) as u64,
         }
@@ -187,6 +192,7 @@ impl Config {
             halt_on_wipe: false,
             stack_cap_fraction: 0.0,
             paper_wallet0: 32.0,
+            stack_skim_gain: 0.0,
             signal_listen: None,
             remote_max_age_ms: 1_500,
         }
