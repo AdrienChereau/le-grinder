@@ -100,6 +100,8 @@ pub struct Grinder {
     wallet_live: std::sync::Arc<std::sync::RwLock<f64>>,
     /// Dernière mesure du mur de liquidité (ms) — cadence ~2 s en position.
     last_wall_poll_ms: i64,
+    /// Dernier mur mesuré : (ts_ms, usdc). Consommé par la sécurisation.
+    last_wall: Option<(i64, f64)>,
 }
 
 pub async fn run(
@@ -216,6 +218,7 @@ pub async fn run(
         wallet_evals: std::collections::VecDeque::with_capacity(3),
         wallet_live,
         last_wall_poll_ms: 0,
+        last_wall: None,
         cfg,
     };
 
@@ -307,6 +310,8 @@ impl Grinder {
             (pos.window_ts, now_ms, pos.side_up, gs.spot, pos.strike);
         match crate::connectors::binance::depth_wall(&self.cfg.binance_symbol, low.min(high), low.max(high), use_asks).await {
             Ok((usdc, qty, span, lvls)) => {
+                self.last_wall = Some((now_ms, usdc));
+                let density = usdc / (spot - strike).abs().max(0.01);
                 use std::io::Write as _;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
@@ -315,7 +320,7 @@ impl Grinder {
                 {
                     let _ = writeln!(
                         f,
-                        "{{\"t\":{ts},\"w\":{w},\"side_up\":{side_up},\"spot\":{spot:.2},\"strike\":{strike:.2},\"wall_usdc\":{usdc:.0},\"wall_qty\":{qty:.4},\"span\":{span:.1},\"levels\":{lvls}}}"
+                        "{{\"t\":{ts},\"w\":{w},\"side_up\":{side_up},\"spot\":{spot:.2},\"strike\":{strike:.2},\"wall_usdc\":{usdc:.0},\"wall_qty\":{qty:.4},\"span\":{span:.1},\"levels\":{lvls},\"density\":{density:.0}}}"
                     );
                 }
             }
@@ -408,6 +413,48 @@ impl Grinder {
 
         // 1quater. Mesure du mur de liquidité (dataset anti-aiguille).
         self.record_wall(now_ms).await;
+
+        // 1quinquies. SÉCURISATION DE FIN DE FENÊTRE (anti-aiguille, 20 juil.) :
+        // dans les dernières secondes, si le mur vers le strike est tombé sous
+        // le seuil (traversée bon marché pour un sniper) et que le bid permet
+        // de sortir presque plein, on encaisse au lieu de porter jusqu'à la
+        // cloche. Milieu de fenêtre : rien ne change.
+        if self.cfg.secure_wall_usdc > 0.0 {
+            if let Phase::InPosition(pos) = &self.phase {
+                let remaining = (pos.end_ms - now_ms) / 1000;
+                let wall_fresh_low = self
+                    .last_wall
+                    .map(|(t, u)| now_ms - t < 6_000 && u < self.cfg.secure_wall_usdc)
+                    .unwrap_or(false);
+                if !pos.ride && remaining > 3 && remaining <= self.cfg.secure_last_s && wall_fresh_low {
+                    let pos = pos.clone();
+                    if let Some(book) = self.best_book(&pos.token_id).await {
+                        if let Some(bid) = book.best_bid() {
+                            if bid >= self.cfg.secure_min_price {
+                                tracing::warn!(
+                                    bid,
+                                    wall = self.last_wall.map(|(_, u)| u).unwrap_or(0.0),
+                                    remaining,
+                                    "🛡️ SÉCURISATION fin de fenêtre : mur fragile, on encaisse"
+                                );
+                                let fill = self.exec_sell(&pos.token_id, pos.shares).await;
+                                if fill.shares > 0.0 {
+                                    let proceeds =
+                                        (fill.notional - fill.fees).max(0.0) + pos.cash_left;
+                                    let gs = self.guard_now();
+                                    let z = gs.margin_z(pos.strike, pos.dir(), remaining as f64);
+                                    self.settle(
+                                        &pos, "secure", "secure_wall", proceeds, fill.fees, z, gs,
+                                    )
+                                    .await;
+                                    self.phase = Phase::Scanning;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // 2. Rollover / découverte du marché courant.
         let need_market = match &self.market {
@@ -725,9 +772,11 @@ impl Grinder {
         self.st.windows_played += 1;
         self.st.realized_pnl += pnl;
 
-        if outcome == "win" {
-            self.st.streak += 1;
-            self.st.best_streak = self.st.best_streak.max(self.st.streak);
+        if outcome == "win" || outcome == "secure" {
+            if outcome == "win" {
+                self.st.streak += 1;
+                self.st.best_streak = self.st.best_streak.max(self.st.streak);
+            }
             self.st.stack = proceeds;
         } else if proceeds >= self.cfg.grind_base {
             // Sortie catastrophe qui sauve plus que la base : on continue le run
