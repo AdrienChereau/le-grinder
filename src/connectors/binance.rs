@@ -99,6 +99,43 @@ pub async fn price_at_window_close(symbol: &str, window_ts: i64) -> anyhow::Resu
     Ok(k.get(4).and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()))
 }
 
+/// Mur de liquidité entre deux prix (carnet REST complet, limit=1000).
+/// `use_asks=true` : somme des ASKS dans [low, high] (résistance à une montée) ;
+/// sinon somme des BIDS (résistance à une descente). Retourne
+/// (usdc_du_mur, qty_base, portée_$ du carnet, nb_niveaux_dans_le_mur).
+pub async fn depth_wall(
+    symbol: &str,
+    low: f64,
+    high: f64,
+    use_asks: bool,
+) -> anyhow::Result<(f64, f64, f64, u32)> {
+    let url = format!("https://api.binance.com/api/v3/depth?symbol={symbol}&limit=1000");
+    let v: serde_json::Value = reqwest::Client::new()
+        .get(&url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let side = if use_asks { "asks" } else { "bids" };
+    let levels = v.get(side).and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let (mut usdc, mut qty, mut lvls) = (0.0, 0.0, 0u32);
+    let (mut pmin, mut pmax) = (f64::MAX, f64::MIN);
+    for l in &levels {
+        let (Some(p), Some(q)) = (
+            l.get(0).and_then(|x| x.as_str()).and_then(|x| x.parse::<f64>().ok()),
+            l.get(1).and_then(|x| x.as_str()).and_then(|x| x.parse::<f64>().ok()),
+        ) else { continue };
+        pmin = pmin.min(p); pmax = pmax.max(p);
+        if p >= low && p <= high {
+            usdc += p * q; qty += q; lvls += 1;
+        }
+    }
+    let span = if pmax > pmin { pmax - pmin } else { 0.0 };
+    Ok((usdc, qty, span, lvls))
+}
+
 /// Boucle de connexion résiliente. Ne retourne jamais en fonctionnement normal :
 /// en cas de coupure, reconnecte avec backoff exponentiel borné.
 pub async fn run(url: String, tx: watch::Sender<Option<BookUpdate>>) -> anyhow::Result<()> {

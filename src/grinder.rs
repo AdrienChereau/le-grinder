@@ -98,6 +98,8 @@ pub struct Grinder {
     /// Wallet lu en continu par le poller (max glissant 90 s), 0.0 tant que
     /// rien n'a été lu. Alimente le dashboard et le cap Kelly entre les settles.
     wallet_live: std::sync::Arc<std::sync::RwLock<f64>>,
+    /// Dernière mesure du mur de liquidité (ms) — cadence ~2 s en position.
+    last_wall_poll_ms: i64,
 }
 
 pub async fn run(
@@ -213,6 +215,7 @@ pub async fn run(
         tick_file: None,
         wallet_evals: std::collections::VecDeque::with_capacity(3),
         wallet_live,
+        last_wall_poll_ms: 0,
         cfg,
     };
 
@@ -270,6 +273,53 @@ impl Grinder {
                 t.ofi, t.obi, t.velocity, t.impulse, t.ts_ms_local < t.kill_until_ms
             );
             let _ = f.write_all(line.as_bytes());
+        }
+    }
+
+    /// Estimation du wallet total : poller live, ou wallet virtuel en paper.
+    fn wallet_estimate(&self) -> f64 {
+        let polled = self.wallet_live.read().map(|w| *w).unwrap_or(0.0);
+        if polled > 0.0 {
+            polled
+        } else if self.cfg.mode != "live" {
+            (self.cfg.paper_wallet0 + self.st.realized_pnl).max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Mesure du mur de liquidité pendant une position (toutes les ~2 s) :
+    /// combien d'USDC d'ordres agressifs il faudrait pour pousser le spot
+    /// jusqu'au strike. Dataset de calibration anti-aiguille (20 juil.).
+    async fn record_wall(&mut self, now_ms: i64) {
+        if now_ms - self.last_wall_poll_ms < 2_000 {
+            return;
+        }
+        let Phase::InPosition(pos) = &self.phase else { return };
+        self.last_wall_poll_ms = now_ms;
+        let gs = self.guard_now();
+        let (low, high, use_asks) = if pos.side_up {
+            (pos.strike, gs.spot, false) // Up : le danger = vendre les BIDS de spot→strike
+        } else {
+            (gs.spot, pos.strike, true) // Down : le danger = consommer les ASKS de spot→strike
+        };
+        let (w, ts, side_up, spot, strike) =
+            (pos.window_ts, now_ms, pos.side_up, gs.spot, pos.strike);
+        match crate::connectors::binance::depth_wall(&self.cfg.binance_symbol, low.min(high), low.max(high), use_asks).await {
+            Ok((usdc, qty, span, lvls)) => {
+                use std::io::Write as _;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("data/wall_ticks.jsonl")
+                {
+                    let _ = writeln!(
+                        f,
+                        "{{\"t\":{ts},\"w\":{w},\"side_up\":{side_up},\"spot\":{spot:.2},\"strike\":{strike:.2},\"wall_usdc\":{usdc:.0},\"wall_qty\":{qty:.4},\"span\":{span:.1},\"levels\":{lvls}}}"
+                    );
+                }
+            }
+            Err(e) => tracing::debug!(error = %e, "mesure du mur échouée"),
         }
     }
 
@@ -355,6 +405,9 @@ impl Grinder {
                 }
             }
         }
+
+        // 1quater. Mesure du mur de liquidité (dataset anti-aiguille).
+        self.record_wall(now_ms).await;
 
         // 2. Rollover / découverte du marché courant.
         let need_market = match &self.market {
@@ -682,10 +735,32 @@ impl Grinder {
             self.st.streak = 0;
             self.st.stack = proceeds;
         } else {
-            // Wipe : retour à la mise de base, nouveau run.
+            // Wipe : retour à la mise de base DYNAMIQUE (min(base, 15% wallet) —
+            // on ne réarme pas 10 $ fixes dans un wallet qui a saigné), nouveau run.
             self.st.streak = 0;
             self.st.run_id += 1;
-            self.st.stack = self.cfg.grind_base;
+            let wallet_est = self.wallet_estimate();
+            let base = if wallet_est > 0.0 {
+                self.cfg.grind_base.min(0.15 * wallet_est).max(2.0)
+            } else {
+                self.cfg.grind_base
+            };
+            self.st.stack = base;
+            // Disjoncteur : trop de resets en 12 h → gel (live uniquement).
+            let now_s = Utc::now().timestamp();
+            self.st.reset_ts.push(now_s);
+            self.st.reset_ts.retain(|t| now_s - t < 12 * 3600);
+            if self.cfg.max_resets_12h > 0
+                && self.cfg.mode == "live"
+                && self.st.reset_ts.len() as u32 >= self.cfg.max_resets_12h
+            {
+                self.st.halted = true;
+                tracing::error!(
+                    resets = self.st.reset_ts.len(),
+                    "🛑 DISJONCTEUR : {} resets en <12 h — gel, réarmement humain requis",
+                    self.st.reset_ts.len()
+                );
+            }
             // Coupe-circuit (consigne du 15 juil.) : perte totale à résolution
             // ou récupération < 1 $ → plus AUCUNE entrée, intervention humaine.
             if self.cfg.halt_on_wipe && (outcome == "loss" || proceeds < 1.0) {
@@ -709,7 +784,7 @@ impl Grinder {
 
         // Cap Kelly PAPER : wallet virtuel = PAPER_WALLET0 + PnL réalisé.
         // Même mécanique que le live, base simulée.
-        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.stack_skim_gain <= 0.0 && self.cfg.mode != "live" {
+        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.mode != "live" {
             let wallet = self.cfg.paper_wallet0 + self.st.realized_pnl;
             let cap = self.cfg.stack_cap_fraction * wallet;
             if wallet > 0.0 && self.st.stack > cap {
@@ -727,7 +802,7 @@ impl Grinder {
         // collatéral wallet réel ; l'excédent est écrémé (il reste au wallet,
         // simplement retiré de la table de jeu — compté dans `banked`).
         #[cfg(feature = "live")]
-        if self.cfg.stack_cap_fraction > 0.0 && self.cfg.stack_skim_gain <= 0.0 {
+        if self.cfg.stack_cap_fraction > 0.0 {
             if let Some(l) = &self.live {
                 match l.collateral().await {
                     Ok(c) if c > 0.0 => {

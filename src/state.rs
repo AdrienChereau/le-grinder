@@ -40,6 +40,9 @@ pub struct GrinderState {
     /// la table de jeu, restés au wallet, intouchables par un wipe.
     #[serde(default)]
     pub banked: f64,
+    /// Horodatages unix des resets de run (disjoncteur MAX_RESETS_12H).
+    #[serde(default)]
+    pub reset_ts: Vec<i64>,
 }
 
 impl GrinderState {
@@ -57,6 +60,7 @@ impl GrinderState {
             realized_pnl: 0.0,
             halted: false,
             banked: 0.0,
+            reset_ts: Vec::new(),
         }
     }
 }
