@@ -100,8 +100,8 @@ pub struct Grinder {
     wallet_live: std::sync::Arc<std::sync::RwLock<f64>>,
     /// Dernière mesure du mur de liquidité (ms) — cadence ~2 s en position.
     last_wall_poll_ms: i64,
-    /// Dernier mur mesuré : (ts_ms, usdc). Consommé par la sécurisation.
-    last_wall: Option<(i64, f64)>,
+    /// Dernier mur mesuré : (ts_ms, usdc, densité $/\$). Consommé par la sécurisation.
+    last_wall: Option<(i64, f64, f64)>,
 }
 
 pub async fn run(
@@ -310,8 +310,8 @@ impl Grinder {
             (pos.window_ts, now_ms, pos.side_up, gs.spot, pos.strike);
         match crate::connectors::binance::depth_wall(&self.cfg.binance_symbol, low.min(high), low.max(high), use_asks).await {
             Ok((usdc, qty, span, lvls)) => {
-                self.last_wall = Some((now_ms, usdc));
                 let density = usdc / (spot - strike).abs().max(0.01);
+                self.last_wall = Some((now_ms, usdc, density));
                 use std::io::Write as _;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
@@ -425,12 +425,16 @@ impl Grinder {
         // le seuil (traversée bon marché pour un sniper) et que le bid permet
         // de sortir presque plein, on encaisse au lieu de porter jusqu'à la
         // cloche. Milieu de fenêtre : rien ne change.
-        if self.cfg.secure_wall_usdc > 0.0 {
+        if self.cfg.secure_wall_usdc > 0.0 || self.cfg.secure_density > 0.0 {
             if let Phase::InPosition(pos) = &self.phase {
                 let remaining = (pos.end_ms - now_ms) / 1000;
                 let wall_fresh_low = self
                     .last_wall
-                    .map(|(t, u)| now_ms - t < 6_000 && u < self.cfg.secure_wall_usdc)
+                    .map(|(t, u, d)| {
+                        now_ms - t < 6_000
+                            && ((self.cfg.secure_wall_usdc > 0.0 && u < self.cfg.secure_wall_usdc)
+                                || (self.cfg.secure_density > 0.0 && d < self.cfg.secure_density))
+                    })
                     .unwrap_or(false);
                 if !pos.ride && remaining > 3 && remaining <= self.cfg.secure_last_s && wall_fresh_low {
                     let pos = pos.clone();
@@ -439,7 +443,8 @@ impl Grinder {
                             if bid >= self.cfg.secure_min_price {
                                 tracing::warn!(
                                     bid,
-                                    wall = self.last_wall.map(|(_, u)| u).unwrap_or(0.0),
+                                    wall = self.last_wall.map(|(_, u, _)| u).unwrap_or(0.0),
+                                    density = self.last_wall.map(|(_, _, d)| d).unwrap_or(0.0),
                                     remaining,
                                     "🛡️ SÉCURISATION fin de fenêtre : mur fragile, on encaisse"
                                 );

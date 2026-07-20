@@ -83,6 +83,10 @@ pub struct Config {
     pub secure_wall_usdc: f64,
     pub secure_last_s: i64,
     pub secure_min_price: f64,
+    /// Sécurisation par DENSITÉ du mur (USDC par $ de distance) : robuste sur
+    /// toute la position (le mur absolu rétrécit mécaniquement près du strike).
+    /// 0 = désactivé.
+    pub secure_density: f64,
     /// Adresse UDP d'écoute du flux radar Tokyo (WireTick). None = garde locale.
     pub signal_listen: Option<String>,
     /// Âge max du tick distant avant repli sur la garde locale (ms).
@@ -167,6 +171,7 @@ impl Config {
             secure_wall_usdc: f("SECURE_WALL_USDC", 0.0),
             secure_last_s: i("SECURE_LAST_S", 25),
             secure_min_price: f("SECURE_MIN_PRICE", 0.90),
+            secure_density: f("SECURE_DENSITY", 0.0),
             signal_listen: env::var("SIGNAL_LISTEN").ok().filter(|v| !v.trim().is_empty()),
             remote_max_age_ms: i("REMOTE_MAX_AGE_MS", 1_500) as u64,
         }
@@ -214,6 +219,7 @@ impl Config {
             secure_wall_usdc: 0.0,
             secure_last_s: 25,
             secure_min_price: 0.90,
+            secure_density: 0.0,
             signal_listen: None,
             remote_max_age_ms: 1_500,
         }
