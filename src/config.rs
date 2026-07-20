@@ -76,6 +76,13 @@ pub struct Config {
     pub max_resets: u32,
     /// Fenêtre du disjoncteur en secondes (défaut 3600 = 1 h).
     pub reset_window_s: i64,
+    /// Sécurisation de fin de fenêtre (anti-aiguille, 20 juil.) : dans les
+    /// SECURE_LAST_S dernières secondes, si le mur de liquidité vers le strike
+    /// passe sous SECURE_WALL_USDC et que le bid permet de sortir ≥
+    /// SECURE_MIN_PRICE, on encaisse en taker. 0 = désactivé.
+    pub secure_wall_usdc: f64,
+    pub secure_last_s: i64,
+    pub secure_min_price: f64,
     /// Adresse UDP d'écoute du flux radar Tokyo (WireTick). None = garde locale.
     pub signal_listen: Option<String>,
     /// Âge max du tick distant avant repli sur la garde locale (ms).
@@ -157,6 +164,9 @@ impl Config {
             stack_skim_gain: f("STACK_SKIM_GAIN", 0.0),
             max_resets: i("MAX_RESETS", 0) as u32,
             reset_window_s: i("RESET_WINDOW_S", 3_600),
+            secure_wall_usdc: f("SECURE_WALL_USDC", 0.0),
+            secure_last_s: i("SECURE_LAST_S", 25),
+            secure_min_price: f("SECURE_MIN_PRICE", 0.90),
             signal_listen: env::var("SIGNAL_LISTEN").ok().filter(|v| !v.trim().is_empty()),
             remote_max_age_ms: i("REMOTE_MAX_AGE_MS", 1_500) as u64,
         }
@@ -201,6 +211,9 @@ impl Config {
             stack_skim_gain: 0.0,
             max_resets: 0,
             reset_window_s: 3_600,
+            secure_wall_usdc: 0.0,
+            secure_last_s: 25,
+            secure_min_price: 0.90,
             signal_listen: None,
             remote_max_age_ms: 1_500,
         }
