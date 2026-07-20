@@ -387,9 +387,15 @@ impl Grinder {
         // 1ter. Une réconciliation a détecté une divergence avec le verdict
         // officiel : on gèle tout, la comptabilité doit être reprise à la main.
         if self.reconcile_halt.swap(false, std::sync::atomic::Ordering::SeqCst) {
-            self.st.halted = true;
-            let _ = state::save(&self.cfg.state_path, &self.st);
-            tracing::error!("🛑 HALT : divergence résolution kline vs verdict officiel Polymarket");
+            if self.cfg.mode == "live" {
+                self.st.halted = true;
+                let _ = state::save(&self.cfg.state_path, &self.st);
+                tracing::error!("🛑 HALT : divergence résolution kline vs verdict officiel Polymarket");
+            } else {
+                // Paper : on ne gèle JAMAIS (consigne) — on trace, la compta
+                // simulée peut diverger, c'est acceptable pour un instrument de mesure.
+                tracing::error!("⚠️ divergence résolution kline vs officiel (paper — pas de gel)");
+            }
         }
 
         // 1bis. Garde aveugle : flux Binance mort EN POSITION → sortie de
