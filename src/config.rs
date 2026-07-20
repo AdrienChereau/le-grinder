@@ -71,9 +71,11 @@ pub struct Config {
     /// Écrémage par gain (Adrien, 19 juil.) : à chaque WIN, cette fraction du
     /// GAIN part en réserve, le reste compose. CUMULABLE avec le plafond.
     pub stack_skim_gain: f64,
-    /// Disjoncteur (20 juil.) : N resets de run en 12 h → gel (réarmement
-    /// humain). 0 = désactivé. Live uniquement (les papers ne gèlent jamais).
-    pub max_resets_12h: u32,
+    /// Disjoncteur (20 juil., resserré) : N resets de run dans la fenêtre
+    /// RESET_WINDOW_S → gel (réarmement humain). 0 = désactivé. Live uniquement.
+    pub max_resets: u32,
+    /// Fenêtre du disjoncteur en secondes (défaut 3600 = 1 h).
+    pub reset_window_s: i64,
     /// Adresse UDP d'écoute du flux radar Tokyo (WireTick). None = garde locale.
     pub signal_listen: Option<String>,
     /// Âge max du tick distant avant repli sur la garde locale (ms).
@@ -153,7 +155,8 @@ impl Config {
             stack_cap_fraction: f("STACK_CAP_FRACTION", 0.0),
             paper_wallet0: f("PAPER_WALLET0", 32.0),
             stack_skim_gain: f("STACK_SKIM_GAIN", 0.0),
-            max_resets_12h: i("MAX_RESETS_12H", 0) as u32,
+            max_resets: i("MAX_RESETS", 0) as u32,
+            reset_window_s: i("RESET_WINDOW_S", 3_600),
             signal_listen: env::var("SIGNAL_LISTEN").ok().filter(|v| !v.trim().is_empty()),
             remote_max_age_ms: i("REMOTE_MAX_AGE_MS", 1_500) as u64,
         }
@@ -196,7 +199,8 @@ impl Config {
             stack_cap_fraction: 0.0,
             paper_wallet0: 32.0,
             stack_skim_gain: 0.0,
-            max_resets_12h: 0,
+            max_resets: 0,
+            reset_window_s: 3_600,
             signal_listen: None,
             remote_max_age_ms: 1_500,
         }

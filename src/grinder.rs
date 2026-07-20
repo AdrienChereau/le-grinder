@@ -746,18 +746,19 @@ impl Grinder {
                 self.cfg.grind_base
             };
             self.st.stack = base;
-            // Disjoncteur : trop de resets en 12 h → gel (live uniquement).
+            // Disjoncteur : trop de resets dans la fenêtre → gel (live uniquement).
             let now_s = Utc::now().timestamp();
             self.st.reset_ts.push(now_s);
-            self.st.reset_ts.retain(|t| now_s - t < 12 * 3600);
-            if self.cfg.max_resets_12h > 0
+            self.st.reset_ts.retain(|t| now_s - t < self.cfg.reset_window_s);
+            if self.cfg.max_resets > 0
                 && self.cfg.mode == "live"
-                && self.st.reset_ts.len() as u32 >= self.cfg.max_resets_12h
+                && self.st.reset_ts.len() as u32 >= self.cfg.max_resets
             {
                 self.st.halted = true;
                 tracing::error!(
                     resets = self.st.reset_ts.len(),
-                    "🛑 DISJONCTEUR : {} resets en <12 h — gel, réarmement humain requis",
+                    window_s = self.cfg.reset_window_s,
+                    "🛑 DISJONCTEUR : {} resets dans la fenêtre — gel, réarmement humain requis",
                     self.st.reset_ts.len()
                 );
             }
