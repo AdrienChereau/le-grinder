@@ -151,6 +151,8 @@ pub struct DailyStat {
     pub volume: f64, // Σ des $ engagés
     pub pnl: f64,    // Σ pnl réel des fenêtres réglées (frais inclus)
     pub fees: f64,   // Σ frais taker (réels si loggés, sinon estimés fee_rate×p(1−p)×parts)
+    /// Volume pondéré taker-rebates : Σ coût × (1−prix d'entrée) × 2.3 (poids Crypto).
+    pub wv: f64,
 }
 
 /// Stats des `n_days` derniers jours (du plus récent au plus ancien).
@@ -165,10 +167,12 @@ pub fn daily_stats(path: &str, n_days: usize, fee_rate: f64) -> Vec<DailyStat> {
         let date = r.ts.chars().take(10).collect::<String>();
         let e = map.entry(date.clone()).or_insert(DailyStat {
             date, windows: 0, wins: 0, panics: 0, secures: 0, volume: 0.0, pnl: 0.0, fees: 0.0,
+            wv: 0.0,
         });
         e.windows += 1;
         e.volume += r.cost;
         e.pnl += r.pnl;
+        e.wv += r.cost * (1.0 - r.entry_price) * 2.3;
         e.fees += if r.fees > 0.0 {
             r.fees
         } else {

@@ -162,7 +162,7 @@ pub async fn run(
     {
         let mut d = dash.write().await;
         d.windows = state::tail_windows(&cfg.windows_path, 50);
-        d.daily = state::daily_stats(&cfg.windows_path, 7, cfg.taker_fee_rate);
+        d.daily = state::daily_stats(&cfg.windows_path, 30, cfg.taker_fee_rate);
         d.asset = cfg.asset.clone();
         apply_state(&mut d, &st);
         d.phase = "waiting_market".into();
@@ -974,7 +974,7 @@ impl Grinder {
             let excess = d.windows.len() - 50;
             d.windows.drain(..excess);
         }
-        d.daily = state::daily_stats(&self.cfg.windows_path, 7, self.cfg.taker_fee_rate);
+        d.daily = state::daily_stats(&self.cfg.windows_path, 30, self.cfg.taker_fee_rate);
     }
 
     /// Carnet le plus frais : WS si récent, sinon fallback REST (jamais WS seul).

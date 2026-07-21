@@ -126,8 +126,8 @@
   <div class="mini"><div class="lbl">Run</div><div class="val num" id="run">–</div><div class="sub num">pic stack <span id="best_stack">–</span></div></div>
   <div class="mini"><div class="lbl">Fenêtres</div><div class="val num" id="played">–</div><div class="sub num"><span class="green" id="wins">–</span> W · <span class="amber" id="panics">–</span> P · <span class="red" id="losses">–</span> L</div></div>
   <div class="mini"><div class="lbl">PnL total</div><div class="val num" id="pnl_total">–</div><div class="sub">depuis le début</div></div>
-  <div class="mini"><div class="lbl">Rebate maker potentiel</div><div class="val num blue" id="rebate_day">–</div><div class="sub num">jour · total <span id="rebate_tot">–</span></div></div>
-  <div class="mini"><div class="lbl">Frais estimés (jour)</div><div class="val num" id="fees_day">–</div><div class="sub">taker, formule p(1−p)</div></div>
+  <div class="mini"><div class="lbl">Rebate taker</div><div class="val num blue" id="rebate_day">–</div><div class="sub num" id="rebate_sub">–</div></div>
+  <div class="mini"><div class="lbl">Volume pondéré 30 j</div><div class="val num" id="wv30">–</div><div class="sub num">frais jour <span id="fees_day">–</span></div></div>
 </div>
 
 <div class="strip num">
@@ -148,9 +148,20 @@
   <table class="num">
     <thead><tr>
       <th>Date</th><th>Fenêtres</th><th>Wins</th><th>Panics</th><th>Secures</th>
-      <th>Volume</th><th>Frais est.</th><th>Rebate 20%</th><th>PnL</th><th>PnL / volume</th>
+      <th>Volume</th><th>wV</th><th>Frais est.</th><th>PnL</th><th>PnL / volume</th>
     </tr></thead>
     <tbody id="daily_rows"></tbody>
+  </table>
+</div>
+
+<div class="card scroll">
+  <h2>Taker rebates — progression par niveau (volume pondéré 30 j, crypto ×2.3)</h2>
+  <table class="num">
+    <thead><tr>
+      <th>Niveau</th><th>Rebate</th><th>Seuil wV 30 j</th><th>Progression</th>
+      <th>Rebate estimé / jour à ce niveau</th>
+    </tr></thead>
+    <tbody id="tier_rows"></tbody>
   </table>
 </div>
 
@@ -173,6 +184,17 @@ const pol = v => v >= 0 ? 'green' : 'red';
 
 // Seuils du filtre z : ≥1.5 (z d'entrée) = vert, ≥0.7 = bleu, dessous = rouge.
 const zClass = z => z >= 1.5 ? 'green' : z >= 0.7 ? 'blue' : 'red';
+
+// Taker rebates (docs.polymarket.com/trading/taker-rebates) : niveau selon le
+// volume pondéré 30 j ; le rebate est lu comme % des frais taker payés.
+const TIERS = [
+  { name:'Bronze',   seuil:2_000,      pct:0.03 },
+  { name:'Silver',   seuil:20_000,     pct:0.08 },
+  { name:'Gold',     seuil:200_000,    pct:0.18 },
+  { name:'Platinum', seuil:1_000_000,  pct:0.32 },
+  { name:'Diamond',  seuil:4_000_000,  pct:0.44 },
+  { name:'Obsidian', seuil:10_000_000, pct:0.50 },
+];
 
 let lastWinKey = null;   // détection d'une nouvelle fenêtre réglée → flash
 let flashUntil = 0;      // le flash gagne/perd prime sur le filtre z pendant ~3 s
@@ -252,12 +274,35 @@ async function tick() {
   $('pnl_total').textContent = signUsd(s.realized_pnl);
   $('pnl_total').className = 'val num ' + pol(s.realized_pnl);
 
-  // Rebates : 20 % des frais (maker rebates crypto) si ce volume était maker.
+  // ══ Taker rebates : wV 30 j → niveau → % des frais taker ══
   const feesDay = d0 ? d0.fees : 0;
-  const feesTot = (s.daily || []).reduce((a, d) => a + d.fees, 0);
+  const wv30 = (s.daily || []).reduce((a, d) => a + d.wv, 0);
+  const tier = [...TIERS].reverse().find(t => wv30 >= t.seuil) || null;
+  $('wv30').textContent = usd(wv30);
   $('fees_day').textContent = usd(feesDay);
-  $('rebate_day').textContent = usd(feesDay * 0.20);
-  $('rebate_tot').textContent = usd(feesTot * 0.20) + ' (7 j)';
+  $('rebate_day').textContent = tier ? usd(feesDay * tier.pct) + ' / j' : 'aucun';
+  $('rebate_sub').textContent = tier
+    ? `niveau ${tier.name} · ${(tier.pct * 100).toFixed(0)} % des frais`
+    : `sous Bronze — ${(100 * wv30 / TIERS[0].seuil).toFixed(0)} % du seuil`;
+
+  // Fenêtres actives des 30 derniers jours → wV/jour moyen (progression projetée)
+  const activeDays = (s.daily || []).filter(d => d.windows > 0).length || 1;
+  const wvRate = wv30 / activeDays;
+  $('tier_rows').innerHTML = TIERS.map(t => {
+    const prog = Math.min(100, 100 * wv30 / t.seuil);
+    const reached = wv30 >= t.seuil;
+    const days = reached ? null : (t.seuil - wv30) / (wvRate || 1);
+    const projection = reached ? 'atteint'
+      : (wvRate > 0 ? `~${Math.ceil(days)} j au rythme actuel` : '–');
+    const cur = tier && tier.name === t.name;
+    return `<tr class="${cur ? 'today' : ''}">
+      <td>${t.name}${cur ? ' ◄' : ''}</td>
+      <td class="blue">${(t.pct * 100).toFixed(0)} %</td>
+      <td>${usd(t.seuil)}</td>
+      <td class="${reached ? 'green' : 'dim'}">${prog.toFixed(1)} % · ${projection}</td>
+      <td class="${reached ? 'blue' : 'dim'}">${usd(feesDay * t.pct)}</td>
+    </tr>`;
+  }).join('');
 
   $('phase').textContent = s.phase;
   $('phase').className = inPos ? 'blue' : '';
@@ -274,14 +319,14 @@ async function tick() {
     $('pos').textContent = `${s.pos_side.toUpperCase()} ${s.pos_shares.toFixed(0)}p @ ${s.pos_entry_price.toFixed(3)}`;
   } else { $('pos_wrap').style.display = 'none'; }
 
-  $('daily_rows').innerHTML = (s.daily || []).map(d => {
+  $('daily_rows').innerHTML = (s.daily || []).slice(0, 7).map(d => {
     const ratio = d.volume > 0 ? (100 * d.pnl / d.volume).toFixed(2) + '%' : '–';
     return `<tr class="${d.date === today ? 'today' : ''}">
       <td>${d.date}</td><td>${d.windows}</td>
       <td class="green">${d.wins}</td><td class="amber">${d.panics}</td><td class="blue">${d.secures}</td>
       <td>${usd(d.volume)}</td>
+      <td class="blue">${usd(d.wv)}</td>
       <td class="dim">${usd(d.fees)}</td>
-      <td class="blue">${usd(d.fees * 0.20)}</td>
       <td class="${pol(d.pnl)}">${signUsd(d.pnl)}</td>
       <td class="${pol(d.pnl)}">${ratio}</td>
     </tr>`;
