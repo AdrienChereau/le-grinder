@@ -5,39 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Le Grinder</title>
 <style>
-  :root { --bg:#0b0e14; --card:#131826; --card2:#0f1420; --line:#232b3d;
-          --txt:#e8ecf4; --dim:#939db5; --faint:#5c667e;
-          --green:#3fb950; --red:#f85149; --amber:#d29922; --blue:#58a6ff; }
+  :root { --bg:#06080f; --card:#0d1322; --card2:#0a0f1b; --line:#1d2740;
+          --txt:#e8ecf4; --dim:#93a0bd; --faint:#5a6580;
+          --green:#2bff88; --red:#ff3b4e; --amber:#ffc233; --blue:#2ea8ff; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--txt); padding:20px;
-         font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .num { font-variant-numeric:tabular-nums; font-feature-settings:"tnum"; }
-  header { display:flex; align-items:center; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
-  header h1 { font-size:16px; font-weight:700; letter-spacing:1.5px; }
-  .badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:12px; letter-spacing:.5px; }
-  .badge.live  { background:var(--red); color:#fff; }
+         font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  /* Scanlines discrètes — ambiance console */
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px); }
+  .num { font-variant-numeric:tabular-nums; }
+
+  /* ══ Filtre plein écran piloté par le z (machine à sous) ══ */
+  #overlay { position:fixed; inset:0; pointer-events:none; z-index:100; opacity:0; }
+  @keyframes pulse { 0%,100% { opacity:.04; } 50% { opacity:.30; } }
+  @keyframes pulseFast { 0%,100% { opacity:.08; } 50% { opacity:.45; } }
+  @keyframes jackpot { 0%,100% { opacity:0; } 15%,45%,75% { opacity:.55; } 30%,60% { opacity:.1; } }
+  body.z-green #overlay { background:radial-gradient(ellipse at center, rgba(43,255,136,.5), rgba(43,255,136,.15) 70%);
+                          animation:pulse 1.6s ease-in-out infinite; }
+  body.z-blue  #overlay { background:radial-gradient(ellipse at center, rgba(46,168,255,.5), rgba(46,168,255,.15) 70%);
+                          animation:pulse 1.1s ease-in-out infinite; }
+  body.z-red   #overlay { background:radial-gradient(ellipse at center, rgba(255,59,78,.55), rgba(255,59,78,.2) 70%);
+                          animation:pulseFast .55s ease-in-out infinite; }
+  body.flash-win  #overlay { background:rgba(43,255,136,.6);  animation:jackpot 2.8s ease-out 1; }
+  body.flash-loss #overlay { background:rgba(255,59,78,.65);  animation:jackpot 2.8s ease-out 1; }
+
+  header { display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  header h1 { font-size:17px; font-weight:700; letter-spacing:3px;
+              text-shadow:0 0 12px rgba(46,168,255,.6); }
+  .badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:12px; letter-spacing:1px; }
+  .badge.live  { background:var(--red); color:#fff; box-shadow:0 0 10px rgba(255,59,78,.5); }
   .badge.paper { background:var(--amber); color:#000; }
   .badge.asset { background:var(--card); border:1px solid var(--line); color:var(--dim); }
   .guard { margin-left:auto; font-size:12px; color:var(--dim); display:flex; align-items:center; gap:6px; }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--red); }
-  .dot.ok { background:var(--green); }
+  .dot.ok { background:var(--green); box-shadow:0 0 8px var(--green); }
 
-  /* ── Tuiles héros ── */
-  .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:14px; }
-  .tile { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
-  .tile .lbl { font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin-bottom:6px; }
-  .tile .val { font-size:38px; font-weight:700; line-height:1.1; }
-  .tile .sub { font-size:12px; color:var(--faint); margin-top:6px; }
+  /* ══ Tuiles héros ══ */
+  .hero { display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr; gap:14px; margin-bottom:14px; }
+  @media (max-width:1100px){ .hero { grid-template-columns:1fr 1fr; } }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; position:relative; }
+  .tile .lbl { font-size:10px; text-transform:uppercase; letter-spacing:2px; color:var(--dim); margin-bottom:6px; }
+  .tile .val { font-size:36px; font-weight:700; line-height:1.1; }
+  .tile .sub { font-size:11.5px; color:var(--faint); margin-top:6px; }
   .tile .sub b { color:var(--dim); font-weight:600; }
 
-  /* ── Tuiles secondaires ── */
-  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:14px; }
+  /* La tuile Z — l'instrument principal */
+  #z_tile { border-width:2px; text-align:center; }
+  #z_tile .val { font-size:64px; letter-spacing:2px; }
+  #z_tile.zg { border-color:var(--green); } #z_tile.zg .val { color:var(--green); text-shadow:0 0 24px rgba(43,255,136,.8); }
+  #z_tile.zb { border-color:var(--blue);  } #z_tile.zb .val { color:var(--blue);  text-shadow:0 0 24px rgba(46,168,255,.8); }
+  #z_tile.zr { border-color:var(--red);   } #z_tile.zr .val { color:var(--red);   text-shadow:0 0 24px rgba(255,59,78,.9); }
+
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
   .mini { background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:10px 14px; }
-  .mini .lbl { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--faint); }
+  .mini .lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:1.5px; color:var(--faint); }
   .mini .val { font-size:18px; font-weight:700; margin-top:2px; }
   .mini .sub { font-size:11px; color:var(--faint); }
 
-  /* ── Bandeau statut ── */
   .strip { background:var(--card2); border:1px solid var(--line); border-radius:10px;
            padding:10px 14px; margin-bottom:14px; display:flex; gap:22px; flex-wrap:wrap;
            font-size:12px; align-items:baseline; }
@@ -47,24 +72,24 @@
   .green { color:var(--green); } .red { color:var(--red); }
   .amber { color:var(--amber); } .blue { color:var(--blue); } .dim { color:var(--dim); }
 
-  /* ── Tables ── */
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:14px; }
-  .card h2 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:1.2px; margin-bottom:10px; }
+  .card h2 { font-size:10.5px; color:var(--dim); text-transform:uppercase; letter-spacing:2px; margin-bottom:10px; }
   .scroll { overflow-x:auto; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
   tbody tr:last-child td { border-bottom:none; }
-  th { color:var(--faint); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+  th { color:var(--faint); font-weight:500; font-size:10.5px; text-transform:uppercase; letter-spacing:.8px; }
   td:first-child, th:first-child { text-align:left; }
-  tr.today td { background:rgba(88,166,255,.05); }
-  .pill { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 8px; border-radius:9px; text-transform:uppercase; letter-spacing:.4px; }
-  .pill.win    { background:rgba(63,185,80,.15);  color:var(--green); }
-  .pill.loss   { background:rgba(248,81,73,.15);  color:var(--red); }
-  .pill.panic  { background:rgba(210,153,34,.15); color:var(--amber); }
-  .pill.secure { background:rgba(88,166,255,.15); color:var(--blue); }
+  tr.today td { background:rgba(46,168,255,.06); }
+  .pill { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 8px; border-radius:9px; text-transform:uppercase; letter-spacing:.5px; }
+  .pill.win    { background:rgba(43,255,136,.14); color:var(--green); }
+  .pill.loss   { background:rgba(255,59,78,.14);  color:var(--red); }
+  .pill.panic  { background:rgba(255,194,51,.14); color:var(--amber); }
+  .pill.secure { background:rgba(46,168,255,.14); color:var(--blue); }
 </style>
 </head>
 <body>
+<div id="overlay"></div>
 
 <header>
   <h1>LE GRINDER</h1>
@@ -73,12 +98,16 @@
   <div class="guard"><span class="dot" id="guard_dot"></span><span id="guard_txt">garde…</span></div>
 </header>
 
-<!-- Tuiles héros : le PnL réel du jour d'abord -->
 <div class="hero">
+  <div class="tile" id="z_tile">
+    <div class="lbl" id="z_lbl">Marge z</div>
+    <div class="val num" id="z_big">—</div>
+    <div class="sub" id="z_sub">hors position</div>
+  </div>
   <div class="tile">
-    <div class="lbl" id="pnl_day_lbl">PnL du jour</div>
+    <div class="lbl">PnL du jour</div>
     <div class="val num" id="pnl_day">–</div>
-    <div class="sub" id="pnl_day_sub">–</div>
+    <div class="sub" id="pnl_day_sub">Σ fenêtres réglées, frais inclus</div>
   </div>
   <div class="tile">
     <div class="lbl">Volume du jour</div>
@@ -96,8 +125,9 @@
   <div class="mini"><div class="lbl">Série</div><div class="val num" id="streak">–</div><div class="sub num">record <span id="best_streak">–</span></div></div>
   <div class="mini"><div class="lbl">Run</div><div class="val num" id="run">–</div><div class="sub num">pic stack <span id="best_stack">–</span></div></div>
   <div class="mini"><div class="lbl">Fenêtres</div><div class="val num" id="played">–</div><div class="sub num"><span class="green" id="wins">–</span> W · <span class="amber" id="panics">–</span> P · <span class="red" id="losses">–</span> L</div></div>
-  <div class="mini"><div class="lbl">PnL total (ledger)</div><div class="val num" id="pnl_total">–</div><div class="sub">depuis le début</div></div>
-  <div class="mini"><div class="lbl">Taux de win</div><div class="val num" id="winrate">–</div><div class="sub">résolutions gagnées</div></div>
+  <div class="mini"><div class="lbl">PnL total</div><div class="val num" id="pnl_total">–</div><div class="sub">depuis le début</div></div>
+  <div class="mini"><div class="lbl">Rebate maker potentiel</div><div class="val num blue" id="rebate_day">–</div><div class="sub num">jour · total <span id="rebate_tot">–</span></div></div>
+  <div class="mini"><div class="lbl">Frais estimés (jour)</div><div class="val num" id="fees_day">–</div><div class="sub">taker, formule p(1−p)</div></div>
 </div>
 
 <div class="strip num">
@@ -114,11 +144,11 @@
 </div>
 
 <div class="card scroll">
-  <h2>Par jour (UTC)</h2>
+  <h2>Par jour (UTC) — PnL réel des fenêtres réglées</h2>
   <table class="num">
     <thead><tr>
       <th>Date</th><th>Fenêtres</th><th>Wins</th><th>Panics</th><th>Secures</th>
-      <th>Volume</th><th>PnL ledger</th><th>PnL / volume</th>
+      <th>Volume</th><th>Frais est.</th><th>Rebate 20%</th><th>PnL</th><th>PnL / volume</th>
     </tr></thead>
     <tbody id="daily_rows"></tbody>
   </table>
@@ -141,6 +171,12 @@ const usd = v => (v < 0 ? '−$' : '$') + Math.abs(+v).toFixed(2);
 const signUsd = v => (v >= 0 ? '+$' : '−$') + Math.abs(+v).toFixed(2);
 const pol = v => v >= 0 ? 'green' : 'red';
 
+// Seuils du filtre z : ≥1.5 (z d'entrée) = vert, ≥0.7 = bleu, dessous = rouge.
+const zClass = z => z >= 1.5 ? 'green' : z >= 0.7 ? 'blue' : 'red';
+
+let lastWinKey = null;   // détection d'une nouvelle fenêtre réglée → flash
+let flashUntil = 0;      // le flash gagne/perd prime sur le filtre z pendant ~3 s
+
 async function tick() {
   let s;
   try { s = await (await fetch('/state')).json(); }
@@ -152,46 +188,61 @@ async function tick() {
   m.className = 'badge ' + (live ? 'live' : 'paper');
   $('asset').textContent = (s.asset || 'btc').toUpperCase() + ' 5m';
 
-  // ── Garde Tokyo ──
   const guardOk = s.binance_connected && !s.kill;
   $('guard_dot').className = 'dot' + (guardOk ? ' ok' : '');
   $('guard_txt').textContent = s.kill ? 'KILL RADAR' :
     (s.binance_connected ? `garde OK · ${s.guard_age_ms} ms` : 'garde PÉRIMÉE');
 
-  // ── Jour courant (UTC) ──
+  // ══ Machine à sous : flash win/loss à chaque fenêtre réglée ══
+  const last = s.windows[s.windows.length - 1];
+  const key = last ? last.ts + last.window_ts : null;
+  if (lastWinKey !== null && key !== lastWinKey && last) {
+    const good = last.outcome === 'win' || last.outcome === 'secure';
+    document.body.classList.remove('flash-win', 'flash-loss', 'z-green', 'z-blue', 'z-red');
+    void document.body.offsetWidth; // relance l'animation
+    document.body.classList.add(good ? 'flash-win' : 'flash-loss');
+    flashUntil = Date.now() + 3000;
+  }
+  lastWinKey = key;
+
+  // ══ Filtre z plein écran (en position uniquement) ══
+  const inPos = s.phase === 'in_position' && s.pos_side;
+  if (Date.now() > flashUntil) {
+    document.body.classList.remove('flash-win', 'flash-loss', 'z-green', 'z-blue', 'z-red');
+    if (inPos) document.body.classList.add('z-' + zClass(s.pos_z));
+  }
+
+  // ══ Tuile Z ══
+  const zt = $('z_tile');
+  if (inPos) {
+    zt.className = 'tile ' + (zClass(s.pos_z) === 'green' ? 'zg' : zClass(s.pos_z) === 'blue' ? 'zb' : 'zr');
+    $('z_big').textContent = s.pos_z.toFixed(2);
+    $('z_sub').textContent = `${s.pos_side.toUpperCase()} ${s.pos_shares.toFixed(0)} parts @ ${s.pos_entry_price.toFixed(3)}`;
+  } else {
+    zt.className = 'tile';
+    $('z_big').textContent = '—';
+    $('z_sub').textContent = 'hors position';
+  }
+
+  // ══ Jour courant : PnL par ACCUMULATION des fenêtres réglées ══
   const today = new Date().toISOString().slice(0, 10);
   const d0 = (s.daily || []).find(d => d.date === today);
+  const pnlDay = d0 ? d0.pnl : 0;
+  $('pnl_day').textContent = signUsd(pnlDay);
+  $('pnl_day').className = 'val num ' + pol(pnlDay);
+  $('pnl_day_sub').textContent = d0 ? `${d0.windows} fenêtres réglées · frais inclus` : 'aucune fenêtre réglée';
 
-  // PnL du jour : RÉEL (wallet − ouverture) en live, ledger du jour en paper.
-  let pnlDay = null, pnlSub = '–';
-  if (live && s.wallet_day_open > 0 && s.live_collateral > 0) {
-    pnlDay = s.live_collateral - s.wallet_day_open;
-    $('pnl_day_lbl').textContent = 'PnL réel du jour';
-    pnlSub = `wallet ${usd(s.live_collateral)} − ouverture ${usd(s.wallet_day_open)}` +
-             (d0 ? ` · ledger ${signUsd(d0.pnl)}` : '');
-  } else if (d0) {
-    pnlDay = d0.pnl;
-    $('pnl_day_lbl').textContent = live ? 'PnL du jour (ledger)' : 'PnL du jour';
-    pnlSub = `${d0.windows} fenêtres jouées`;
-  }
-  $('pnl_day').textContent = pnlDay === null ? '–' : signUsd(pnlDay);
-  $('pnl_day').className = 'val num ' + (pnlDay === null ? '' : pol(pnlDay));
-  $('pnl_day_sub').textContent = pnlSub;
-
-  // Volume du jour
   $('vol_day').textContent = d0 ? usd(d0.volume) : '$0.00';
   $('vol_day_sub').textContent = d0
-    ? `${d0.windows} fenêtres · ${d0.wins} W / ${d0.panics} P / ${d0.secures} S`
+    ? `${d0.wins} W / ${d0.panics} P / ${d0.secures} S`
     : 'aucune fenêtre aujourd’hui';
 
-  // Wallet
   const wallet = live ? s.live_collateral : 0;
   $('wallet_lbl').textContent = live ? 'Wallet USDC' : 'Stack (paper)';
   $('wallet').textContent = live ? (wallet ? usd(wallet) : '–') : usd(s.stack);
   $('stack').textContent = usd(s.stack);
   $('banked').textContent = usd(s.banked || 0);
 
-  // ── Mini-tuiles ──
   $('streak').textContent = s.streak;
   $('best_streak').textContent = s.best_streak;
   $('run').textContent = '#' + s.run_id;
@@ -200,12 +251,16 @@ async function tick() {
   $('wins').textContent = s.wins; $('panics').textContent = s.panic_exits; $('losses').textContent = s.losses;
   $('pnl_total').textContent = signUsd(s.realized_pnl);
   $('pnl_total').className = 'val num ' + pol(s.realized_pnl);
-  const denom = s.wins + s.losses;
-  $('winrate').textContent = denom ? (100 * s.wins / denom).toFixed(1) + '%' : '–';
 
-  // ── Bandeau ──
+  // Rebates : 20 % des frais (maker rebates crypto) si ce volume était maker.
+  const feesDay = d0 ? d0.fees : 0;
+  const feesTot = (s.daily || []).reduce((a, d) => a + d.fees, 0);
+  $('fees_day').textContent = usd(feesDay);
+  $('rebate_day').textContent = usd(feesDay * 0.20);
+  $('rebate_tot').textContent = usd(feesTot * 0.20) + ' (7 j)';
+
   $('phase').textContent = s.phase;
-  $('phase').className = s.phase === 'in_position' ? 'blue' : '';
+  $('phase').className = inPos ? 'blue' : '';
   $('slug').textContent = (s.market_slug || '–').replace(/^\w+-updown-5m-/, '…');
   $('remaining').textContent = s.remaining_s + ' s';
   $('strike').textContent = s.strike ? s.strike.toFixed(1) : '–';
@@ -216,22 +271,22 @@ async function tick() {
   $('block').textContent = s.last_block_reason || '–';
   if (s.pos_side) {
     $('pos_wrap').style.display = '';
-    $('pos').textContent = `${s.pos_side.toUpperCase()} ${s.pos_shares.toFixed(0)}p @ ${s.pos_entry_price.toFixed(3)} · z ${s.pos_z.toFixed(2)}`;
+    $('pos').textContent = `${s.pos_side.toUpperCase()} ${s.pos_shares.toFixed(0)}p @ ${s.pos_entry_price.toFixed(3)}`;
   } else { $('pos_wrap').style.display = 'none'; }
 
-  // ── Table journalière ──
   $('daily_rows').innerHTML = (s.daily || []).map(d => {
     const ratio = d.volume > 0 ? (100 * d.pnl / d.volume).toFixed(2) + '%' : '–';
     return `<tr class="${d.date === today ? 'today' : ''}">
       <td>${d.date}</td><td>${d.windows}</td>
       <td class="green">${d.wins}</td><td class="amber">${d.panics}</td><td class="blue">${d.secures}</td>
       <td>${usd(d.volume)}</td>
+      <td class="dim">${usd(d.fees)}</td>
+      <td class="blue">${usd(d.fees * 0.20)}</td>
       <td class="${pol(d.pnl)}">${signUsd(d.pnl)}</td>
       <td class="${pol(d.pnl)}">${ratio}</td>
     </tr>`;
   }).join('');
 
-  // ── Dernières fenêtres (20) ──
   $('rows').innerHTML = [...s.windows].slice(-20).reverse().map(w => {
     const kind = w.outcome === 'win' ? 'win' : w.outcome === 'panic' ? 'panic'
                : w.outcome === 'secure' ? 'secure' : 'loss';

@@ -149,11 +149,14 @@ pub struct DailyStat {
     pub panics: u32,
     pub secures: u32,
     pub volume: f64, // Σ des $ engagés
-    pub pnl: f64,    // Σ pnl ledger (brut de frais)
+    pub pnl: f64,    // Σ pnl réel des fenêtres réglées (frais inclus)
+    pub fees: f64,   // Σ frais taker (réels si loggés, sinon estimés fee_rate×p(1−p)×parts)
 }
 
 /// Stats des `n_days` derniers jours (du plus récent au plus ancien).
-pub fn daily_stats(path: &str, n_days: usize) -> Vec<DailyStat> {
+/// `fee_rate` sert à ESTIMER les frais des lignes où fees=0 (live n'enregistre
+/// pas les frais réels) : formule Polymarket fee = rate × p(1−p) × parts.
+pub fn daily_stats(path: &str, n_days: usize, fee_rate: f64) -> Vec<DailyStat> {
     let Ok(txt) = std::fs::read_to_string(path) else { return vec![] };
     use std::collections::BTreeMap;
     let mut map: BTreeMap<String, DailyStat> = BTreeMap::new();
@@ -161,11 +164,16 @@ pub fn daily_stats(path: &str, n_days: usize) -> Vec<DailyStat> {
         let Ok(r) = serde_json::from_str::<WindowRecord>(l) else { continue };
         let date = r.ts.chars().take(10).collect::<String>();
         let e = map.entry(date.clone()).or_insert(DailyStat {
-            date, windows: 0, wins: 0, panics: 0, secures: 0, volume: 0.0, pnl: 0.0,
+            date, windows: 0, wins: 0, panics: 0, secures: 0, volume: 0.0, pnl: 0.0, fees: 0.0,
         });
         e.windows += 1;
         e.volume += r.cost;
         e.pnl += r.pnl;
+        e.fees += if r.fees > 0.0 {
+            r.fees
+        } else {
+            fee_rate * r.entry_price * (1.0 - r.entry_price) * r.shares
+        };
         match r.outcome.as_str() {
             "win" => e.wins += 1,
             "panic" => e.panics += 1,
