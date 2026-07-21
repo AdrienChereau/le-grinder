@@ -162,6 +162,8 @@ pub async fn run(
     {
         let mut d = dash.write().await;
         d.windows = state::tail_windows(&cfg.windows_path, 50);
+        d.daily = state::daily_stats(&cfg.windows_path, 7);
+        d.asset = cfg.asset.clone();
         apply_state(&mut d, &st);
         d.phase = "waiting_market".into();
         d.stack = st.stack;
@@ -178,10 +180,37 @@ pub async fn run(
         tokio::spawn(async move {
             let mut window = std::collections::VecDeque::with_capacity(9);
             let mut tick = tokio::time::interval(Duration::from_secs(10));
+            // Snapshot du wallet à l'ouverture de chaque jour UTC → PnL réel/jour.
+            let daily_path = "data/wallet_daily.jsonl";
+            let mut cur_day = String::new();
+            let mut day_open = 0.0_f64;
+            if let Ok(txt) = std::fs::read_to_string(daily_path) {
+                let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                for l in txt.lines() {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(l) {
+                        if v.get("date").and_then(|d| d.as_str()) == Some(today.as_str()) {
+                            cur_day = today.clone();
+                            day_open = v.get("open").and_then(|o| o.as_f64()).unwrap_or(0.0);
+                        }
+                    }
+                }
+            }
             loop {
                 tick.tick().await;
                 match crate::live::auth::get_collateral_balance(&creds).await {
                     Ok(c) if c > 0.0 => {
+                        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                        if today != cur_day {
+                            cur_day = today.clone();
+                            day_open = c;
+                            use std::io::Write as _;
+                            if let Ok(mut f) = std::fs::OpenOptions::new()
+                                .create(true).append(true).open(daily_path)
+                            {
+                                let _ = writeln!(f, "{{\"date\":\"{today}\",\"open\":{c:.4}}}");
+                            }
+                        }
+                        dash2.write().await.wallet_day_open = day_open;
                         window.push_back(c);
                         if window.len() > 9 {
                             window.pop_front();
@@ -945,6 +974,7 @@ impl Grinder {
             let excess = d.windows.len() - 50;
             d.windows.drain(..excess);
         }
+        d.daily = state::daily_stats(&self.cfg.windows_path, 7);
     }
 
     /// Carnet le plus frais : WS si récent, sinon fallback REST (jamais WS seul).

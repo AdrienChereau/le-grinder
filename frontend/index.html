@@ -5,77 +5,131 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Le Grinder</title>
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#c9d1d9; --dim:#8b949e;
+  :root { --bg:#0b0e14; --card:#131826; --card2:#0f1420; --line:#232b3d;
+          --txt:#e8ecf4; --dim:#939db5; --faint:#5c667e;
           --green:#3fb950; --red:#f85149; --amber:#d29922; --blue:#58a6ff; }
   * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--txt); font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; padding:16px; }
-  h1 { font-size:18px; margin-bottom:12px; letter-spacing:.5px; }
-  h1 .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--amber); color:#000; vertical-align:middle; margin-left:8px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-bottom:12px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
-  .card h2 { font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
-  .kv { display:flex; justify-content:space-between; padding:2px 0; }
-  .kv span:first-child { color:var(--dim); }
-  .big { font-size:26px; font-weight:700; }
-  .green { color:var(--green); } .red { color:var(--red); } .amber { color:var(--amber); } .blue { color:var(--blue); }
-  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
-  table { width:100%; border-collapse:collapse; font-size:12px; }
-  th, td { text-align:right; padding:4px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
-  th { color:var(--dim); font-weight:normal; }
-  td:first-child, th:first-child { text-align:left; }
+  body { background:var(--bg); color:var(--txt); padding:20px;
+         font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .num { font-variant-numeric:tabular-nums; font-feature-settings:"tnum"; }
+  header { display:flex; align-items:center; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+  header h1 { font-size:16px; font-weight:700; letter-spacing:1.5px; }
+  .badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:12px; letter-spacing:.5px; }
+  .badge.live  { background:var(--red); color:#fff; }
+  .badge.paper { background:var(--amber); color:#000; }
+  .badge.asset { background:var(--card); border:1px solid var(--line); color:var(--dim); }
+  .guard { margin-left:auto; font-size:12px; color:var(--dim); display:flex; align-items:center; gap:6px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--red); }
+  .dot.ok { background:var(--green); }
+
+  /* ── Tuiles héros ── */
+  .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:14px; }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .tile .lbl { font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin-bottom:6px; }
+  .tile .val { font-size:38px; font-weight:700; line-height:1.1; }
+  .tile .sub { font-size:12px; color:var(--faint); margin-top:6px; }
+  .tile .sub b { color:var(--dim); font-weight:600; }
+
+  /* ── Tuiles secondaires ── */
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:14px; }
+  .mini { background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:10px 14px; }
+  .mini .lbl { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--faint); }
+  .mini .val { font-size:18px; font-weight:700; margin-top:2px; }
+  .mini .sub { font-size:11px; color:var(--faint); }
+
+  /* ── Bandeau statut ── */
+  .strip { background:var(--card2); border:1px solid var(--line); border-radius:10px;
+           padding:10px 14px; margin-bottom:14px; display:flex; gap:22px; flex-wrap:wrap;
+           font-size:12px; align-items:baseline; }
+  .strip span.k { color:var(--faint); margin-right:5px; }
+  .strip b { font-weight:600; }
+
+  .green { color:var(--green); } .red { color:var(--red); }
+  .amber { color:var(--amber); } .blue { color:var(--blue); } .dim { color:var(--dim); }
+
+  /* ── Tables ── */
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+  .card h2 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:1.2px; margin-bottom:10px; }
   .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:none; }
+  th { color:var(--faint); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.6px; }
+  td:first-child, th:first-child { text-align:left; }
+  tr.today td { background:rgba(88,166,255,.05); }
+  .pill { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 8px; border-radius:9px; text-transform:uppercase; letter-spacing:.4px; }
+  .pill.win    { background:rgba(63,185,80,.15);  color:var(--green); }
+  .pill.loss   { background:rgba(248,81,73,.15);  color:var(--red); }
+  .pill.panic  { background:rgba(210,153,34,.15); color:var(--amber); }
+  .pill.secure { background:rgba(88,166,255,.15); color:var(--blue); }
 </style>
 </head>
 <body>
-<h1>LE GRINDER <span class="badge" id="mode">…</span></h1>
 
-<div class="grid">
-  <div class="card">
-    <h2>Stack</h2>
-    <div class="big" id="stack">–</div>
-    <div class="kv"><span>Série (wins)</span><b id="streak">–</b></div>
-    <div class="kv"><span>Run #</span><b id="run">–</b></div>
-    <div class="kv"><span>Meilleur stack</span><b id="best_stack">–</b></div>
-    <div class="kv"><span>Meilleure série</span><b id="best_streak">–</b></div>
-    <div class="kv"><span>PnL réalisé</span><b id="pnl">–</b></div>
-    <div class="kv"><span>Wallet USDC (live)</span><b id="live_collateral">–</b></div>
-    <div class="kv"><span>Écrémé (Kelly)</span><b id="banked" class="green">–</b></div>
+<header>
+  <h1>LE GRINDER</h1>
+  <span class="badge asset" id="asset">…</span>
+  <span class="badge paper" id="mode">…</span>
+  <div class="guard"><span class="dot" id="guard_dot"></span><span id="guard_txt">garde…</span></div>
+</header>
+
+<!-- Tuiles héros : le PnL réel du jour d'abord -->
+<div class="hero">
+  <div class="tile">
+    <div class="lbl" id="pnl_day_lbl">PnL du jour</div>
+    <div class="val num" id="pnl_day">–</div>
+    <div class="sub" id="pnl_day_sub">–</div>
   </div>
-  <div class="card">
-    <h2>Fenêtre</h2>
-    <div class="kv"><span>Phase</span><b id="phase">–</b></div>
-    <div class="kv"><span>Marché</span><b id="slug">–</b></div>
-    <div class="kv"><span>Restant</span><b id="remaining">–</b></div>
-    <div class="kv"><span>Strike</span><b id="strike">–</b></div>
-    <div class="kv"><span>Ask Up / Down</span><b id="asks">–</b></div>
-    <div class="kv"><span>Blocage</span><b id="block" class="amber">–</b></div>
+  <div class="tile">
+    <div class="lbl">Volume du jour</div>
+    <div class="val num" id="vol_day">–</div>
+    <div class="sub" id="vol_day_sub">–</div>
   </div>
-  <div class="card">
-    <h2>Garde Tokyo</h2>
-    <div class="kv"><span>Binance</span><b id="binance">–</b></div>
-    <div class="kv"><span>Spot BTC</span><b id="spot">–</b></div>
-    <div class="kv"><span>Drift (log/s)</span><b id="drift">–</b></div>
-    <div class="kv"><span>Sigma (ann.)</span><b id="sigma">–</b></div>
-    <div class="kv"><span>OBI / Vélocité</span><b id="obivel">–</b></div>
-    <div class="kv"><span>KILL</span><b id="kill">–</b></div>
-  </div>
-  <div class="card">
-    <h2>Position</h2>
-    <div class="kv"><span>Côté</span><b id="pos_side">–</b></div>
-    <div class="kv"><span>Parts</span><b id="pos_shares">–</b></div>
-    <div class="kv"><span>Prix d'entrée</span><b id="pos_entry">–</b></div>
-    <div class="kv"><span>Engagé</span><b id="pos_cost">–</b></div>
-    <div class="kv"><span>Marge z</span><b id="pos_z">–</b></div>
-    <div class="kv"><span>W / L / Panics</span><b id="wlp">–</b></div>
+  <div class="tile">
+    <div class="lbl" id="wallet_lbl">Wallet</div>
+    <div class="val num" id="wallet">–</div>
+    <div class="sub num">stack <b id="stack">–</b> · réserve <b id="banked">–</b></div>
   </div>
 </div>
 
+<div class="stats">
+  <div class="mini"><div class="lbl">Série</div><div class="val num" id="streak">–</div><div class="sub num">record <span id="best_streak">–</span></div></div>
+  <div class="mini"><div class="lbl">Run</div><div class="val num" id="run">–</div><div class="sub num">pic stack <span id="best_stack">–</span></div></div>
+  <div class="mini"><div class="lbl">Fenêtres</div><div class="val num" id="played">–</div><div class="sub num"><span class="green" id="wins">–</span> W · <span class="amber" id="panics">–</span> P · <span class="red" id="losses">–</span> L</div></div>
+  <div class="mini"><div class="lbl">PnL total (ledger)</div><div class="val num" id="pnl_total">–</div><div class="sub">depuis le début</div></div>
+  <div class="mini"><div class="lbl">Taux de win</div><div class="val num" id="winrate">–</div><div class="sub">résolutions gagnées</div></div>
+</div>
+
+<div class="strip num">
+  <span><span class="k">Phase</span><b id="phase">–</b></span>
+  <span><span class="k">Marché</span><b class="dim" id="slug">–</b></span>
+  <span><span class="k">Restant</span><b id="remaining">–</b></span>
+  <span><span class="k">Strike</span><b id="strike">–</b></span>
+  <span><span class="k">Spot</span><b id="spot">–</b></span>
+  <span><span class="k">Asks ↑/↓</span><b id="asks">–</b></span>
+  <span id="pos_wrap" style="display:none"><span class="k">Position</span><b class="blue" id="pos">–</b></span>
+  <span><span class="k">Drift</span><b id="drift">–</b></span>
+  <span><span class="k">σ</span><b id="sigma">–</b></span>
+  <span><span class="k">Blocage</span><b class="amber" id="block">–</b></span>
+</div>
+
 <div class="card scroll">
-  <h2>Fenêtres jouées (50 dernières)</h2>
-  <table>
+  <h2>Par jour (UTC)</h2>
+  <table class="num">
     <thead><tr>
-      <th>Heure</th><th>Côté</th><th>Entrée</th><th>Parts</th><th>Engagé</th>
-      <th>Issue</th><th>Raison</th><th>Récupéré</th><th>PnL</th><th>Stack</th><th>Série</th><th>Run</th>
+      <th>Date</th><th>Fenêtres</th><th>Wins</th><th>Panics</th><th>Secures</th>
+      <th>Volume</th><th>PnL ledger</th><th>PnL / volume</th>
+    </tr></thead>
+    <tbody id="daily_rows"></tbody>
+  </table>
+</div>
+
+<div class="card scroll">
+  <h2>Dernières fenêtres</h2>
+  <table class="num">
+    <thead><tr>
+      <th>Heure</th><th>Côté</th><th>Entrée</th><th>Engagé</th>
+      <th>Issue</th><th>Raison</th><th>PnL</th><th>Stack</th><th>Série</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -83,61 +137,110 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const usd = v => '$' + (+v).toFixed(2);
-const cls = (el, c) => { el.className = c; };
+const usd = v => (v < 0 ? '−$' : '$') + Math.abs(+v).toFixed(2);
+const signUsd = v => (v >= 0 ? '+$' : '−$') + Math.abs(+v).toFixed(2);
+const pol = v => v >= 0 ? 'green' : 'red';
 
 async function tick() {
   let s;
   try { s = await (await fetch('/state')).json(); }
-  catch { $('binance').textContent = 'déconnecté'; return; }
+  catch { $('guard_txt').textContent = 'bot injoignable'; $('guard_dot').className = 'dot'; return; }
 
+  const live = s.mode === 'live';
   const m = $('mode');
   m.textContent = (s.mode || 'paper').toUpperCase();
-  m.style.background = s.mode === 'live' ? 'var(--red)' : 'var(--amber)';
-  m.style.color = s.mode === 'live' ? '#fff' : '#000';
-  $('live_collateral').textContent = s.live_collateral ? usd(s.live_collateral) : '–';
-  $('banked').textContent = s.banked ? usd(s.banked) : '–';
+  m.className = 'badge ' + (live ? 'live' : 'paper');
+  $('asset').textContent = (s.asset || 'btc').toUpperCase() + ' 5m';
+
+  // ── Garde Tokyo ──
+  const guardOk = s.binance_connected && !s.kill;
+  $('guard_dot').className = 'dot' + (guardOk ? ' ok' : '');
+  $('guard_txt').textContent = s.kill ? 'KILL RADAR' :
+    (s.binance_connected ? `garde OK · ${s.guard_age_ms} ms` : 'garde PÉRIMÉE');
+
+  // ── Jour courant (UTC) ──
+  const today = new Date().toISOString().slice(0, 10);
+  const d0 = (s.daily || []).find(d => d.date === today);
+
+  // PnL du jour : RÉEL (wallet − ouverture) en live, ledger du jour en paper.
+  let pnlDay = null, pnlSub = '–';
+  if (live && s.wallet_day_open > 0 && s.live_collateral > 0) {
+    pnlDay = s.live_collateral - s.wallet_day_open;
+    $('pnl_day_lbl').textContent = 'PnL réel du jour';
+    pnlSub = `wallet ${usd(s.live_collateral)} − ouverture ${usd(s.wallet_day_open)}` +
+             (d0 ? ` · ledger ${signUsd(d0.pnl)}` : '');
+  } else if (d0) {
+    pnlDay = d0.pnl;
+    $('pnl_day_lbl').textContent = live ? 'PnL du jour (ledger)' : 'PnL du jour';
+    pnlSub = `${d0.windows} fenêtres jouées`;
+  }
+  $('pnl_day').textContent = pnlDay === null ? '–' : signUsd(pnlDay);
+  $('pnl_day').className = 'val num ' + (pnlDay === null ? '' : pol(pnlDay));
+  $('pnl_day_sub').textContent = pnlSub;
+
+  // Volume du jour
+  $('vol_day').textContent = d0 ? usd(d0.volume) : '$0.00';
+  $('vol_day_sub').textContent = d0
+    ? `${d0.windows} fenêtres · ${d0.wins} W / ${d0.panics} P / ${d0.secures} S`
+    : 'aucune fenêtre aujourd’hui';
+
+  // Wallet
+  const wallet = live ? s.live_collateral : 0;
+  $('wallet_lbl').textContent = live ? 'Wallet USDC' : 'Stack (paper)';
+  $('wallet').textContent = live ? (wallet ? usd(wallet) : '–') : usd(s.stack);
   $('stack').textContent = usd(s.stack);
+  $('banked').textContent = usd(s.banked || 0);
+
+  // ── Mini-tuiles ──
   $('streak').textContent = s.streak;
-  $('run').textContent = s.run_id;
-  $('best_stack').textContent = usd(s.best_stack);
   $('best_streak').textContent = s.best_streak;
-  $('pnl').textContent = usd(s.realized_pnl);
-  cls($('pnl'), s.realized_pnl >= 0 ? 'green' : 'red');
+  $('run').textContent = '#' + s.run_id;
+  $('best_stack').textContent = usd(s.best_stack);
+  $('played').textContent = s.windows_played;
+  $('wins').textContent = s.wins; $('panics').textContent = s.panic_exits; $('losses').textContent = s.losses;
+  $('pnl_total').textContent = signUsd(s.realized_pnl);
+  $('pnl_total').className = 'val num ' + pol(s.realized_pnl);
+  const denom = s.wins + s.losses;
+  $('winrate').textContent = denom ? (100 * s.wins / denom).toFixed(1) + '%' : '–';
 
+  // ── Bandeau ──
   $('phase').textContent = s.phase;
-  cls($('phase'), s.phase === 'in_position' ? 'blue' : '');
-  $('slug').textContent = s.market_slug || '–';
+  $('phase').className = s.phase === 'in_position' ? 'blue' : '';
+  $('slug').textContent = (s.market_slug || '–').replace(/^\w+-updown-5m-/, '…');
   $('remaining').textContent = s.remaining_s + ' s';
-  $('strike').textContent = s.strike ? s.strike.toFixed(2) : '–';
+  $('strike').textContent = s.strike ? s.strike.toFixed(1) : '–';
+  $('spot').textContent = s.spot ? s.spot.toFixed(1) : '–';
   $('asks').textContent = s.up_ask.toFixed(2) + ' / ' + s.down_ask.toFixed(2);
+  $('drift').textContent = s.drift.toExponential(1);
+  $('sigma').textContent = s.sigma.toFixed(2);
   $('block').textContent = s.last_block_reason || '–';
+  if (s.pos_side) {
+    $('pos_wrap').style.display = '';
+    $('pos').textContent = `${s.pos_side.toUpperCase()} ${s.pos_shares.toFixed(0)}p @ ${s.pos_entry_price.toFixed(3)} · z ${s.pos_z.toFixed(2)}`;
+  } else { $('pos_wrap').style.display = 'none'; }
 
-  $('binance').textContent = s.binance_connected ? `frais (${s.guard_age_ms} ms)` : 'PÉRIMÉ';
-  cls($('binance'), s.binance_connected ? 'green' : 'red');
-  $('spot').textContent = s.spot.toFixed(2);
-  $('drift').textContent = s.drift.toExponential(2);
-  $('sigma').textContent = s.sigma.toFixed(3);
-  $('obivel').textContent = s.obi.toFixed(2) + ' / ' + s.velocity.toFixed(1);
-  $('kill').textContent = s.kill ? 'ACTIF' : 'non';
-  cls($('kill'), s.kill ? 'red' : 'green');
+  // ── Table journalière ──
+  $('daily_rows').innerHTML = (s.daily || []).map(d => {
+    const ratio = d.volume > 0 ? (100 * d.pnl / d.volume).toFixed(2) + '%' : '–';
+    return `<tr class="${d.date === today ? 'today' : ''}">
+      <td>${d.date}</td><td>${d.windows}</td>
+      <td class="green">${d.wins}</td><td class="amber">${d.panics}</td><td class="blue">${d.secures}</td>
+      <td>${usd(d.volume)}</td>
+      <td class="${pol(d.pnl)}">${signUsd(d.pnl)}</td>
+      <td class="${pol(d.pnl)}">${ratio}</td>
+    </tr>`;
+  }).join('');
 
-  $('pos_side').textContent = s.pos_side || '–';
-  $('pos_shares').textContent = s.pos_shares ? s.pos_shares.toFixed(2) : '–';
-  $('pos_entry').textContent = s.pos_entry_price ? s.pos_entry_price.toFixed(3) : '–';
-  $('pos_cost').textContent = s.pos_cost ? usd(s.pos_cost) : '–';
-  $('pos_z').textContent = s.pos_side ? s.pos_z.toFixed(2) : '–';
-  cls($('pos_z'), s.pos_z >= 1 ? 'green' : (s.pos_side ? 'red' : ''));
-  $('wlp').textContent = `${s.wins} / ${s.losses} / ${s.panic_exits}`;
-
-  $('rows').innerHTML = [...s.windows].reverse().map(w => {
-    const c = w.outcome === 'win' ? 'green' : (w.outcome === 'panic' ? 'amber' : 'red');
+  // ── Dernières fenêtres (20) ──
+  $('rows').innerHTML = [...s.windows].slice(-20).reverse().map(w => {
+    const kind = w.outcome === 'win' ? 'win' : w.outcome === 'panic' ? 'panic'
+               : w.outcome === 'secure' ? 'secure' : 'loss';
     return `<tr>
-      <td>${w.ts.slice(11,19)}</td><td>${w.side}</td><td>${w.entry_price.toFixed(3)}</td>
-      <td>${w.shares.toFixed(2)}</td><td>${usd(w.cost)}</td>
-      <td class="${c}">${w.outcome}</td><td>${w.reason}</td>
-      <td>${usd(w.proceeds)}</td><td class="${w.pnl >= 0 ? 'green' : 'red'}">${usd(w.pnl)}</td>
-      <td>${usd(w.stack_after)}</td><td>${w.streak_after}</td><td>${w.run_id}</td>
+      <td>${w.ts.slice(11,19)}</td><td>${w.side.toUpperCase()}</td>
+      <td>${w.entry_price.toFixed(3)}</td><td>${usd(w.cost)}</td>
+      <td><span class="pill ${kind}">${w.outcome}</span></td><td class="dim">${w.reason}</td>
+      <td class="${pol(w.pnl)}">${signUsd(w.pnl)}</td>
+      <td>${usd(w.stack_after)}</td><td>${w.streak_after}</td>
     </tr>`;
   }).join('');
 }

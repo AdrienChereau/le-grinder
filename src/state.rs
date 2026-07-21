@@ -140,6 +140,45 @@ pub fn append_window(path: &str, rec: &WindowRecord) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Agrégats par jour UTC (dashboard) — calculés depuis le grand livre complet.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DailyStat {
+    pub date: String, // AAAA-MM-JJ (UTC)
+    pub windows: u32,
+    pub wins: u32,
+    pub panics: u32,
+    pub secures: u32,
+    pub volume: f64, // Σ des $ engagés
+    pub pnl: f64,    // Σ pnl ledger (brut de frais)
+}
+
+/// Stats des `n_days` derniers jours (du plus récent au plus ancien).
+pub fn daily_stats(path: &str, n_days: usize) -> Vec<DailyStat> {
+    let Ok(txt) = std::fs::read_to_string(path) else { return vec![] };
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<String, DailyStat> = BTreeMap::new();
+    for l in txt.lines() {
+        let Ok(r) = serde_json::from_str::<WindowRecord>(l) else { continue };
+        let date = r.ts.chars().take(10).collect::<String>();
+        let e = map.entry(date.clone()).or_insert(DailyStat {
+            date, windows: 0, wins: 0, panics: 0, secures: 0, volume: 0.0, pnl: 0.0,
+        });
+        e.windows += 1;
+        e.volume += r.cost;
+        e.pnl += r.pnl;
+        match r.outcome.as_str() {
+            "win" => e.wins += 1,
+            "panic" => e.panics += 1,
+            "secure" => e.secures += 1,
+            _ => {}
+        }
+    }
+    let mut v: Vec<DailyStat> = map.into_values().collect();
+    v.reverse();
+    v.truncate(n_days);
+    v
+}
+
 /// Relit les `n` dernières fenêtres du grand livre (pour le dashboard au boot).
 pub fn tail_windows(path: &str, n: usize) -> Vec<WindowRecord> {
     let Ok(txt) = fs::read_to_string(path) else {
