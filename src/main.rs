@@ -45,10 +45,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Dashboard.
     let dash = dashboard::shared();
+    let resume = dashboard::resume_flag();
     {
-        let (bind, port, st) = (cfg.dashboard_bind.clone(), cfg.dashboard_port, dash.clone());
+        let (bind, port, st, rf) =
+            (cfg.dashboard_bind.clone(), cfg.dashboard_port, dash.clone(), resume.clone());
         tokio::spawn(async move {
-            if let Err(e) = dashboard::serve(&bind, port, st).await {
+            if let Err(e) = dashboard::serve(&bind, port, st, rf).await {
                 tracing::error!(error = %e, "dashboard arrêté");
             }
         });
@@ -66,5 +68,5 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Boucle Grinder (ne retourne qu'en erreur fatale).
-    grinder::run(cfg, brx, dash).await
+    grinder::run(cfg, brx, dash, resume).await
 }

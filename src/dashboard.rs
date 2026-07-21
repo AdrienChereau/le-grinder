@@ -65,17 +65,26 @@ pub struct DashState {
 }
 
 pub type Shared = Arc<RwLock<DashState>>;
+/// Levé par POST /resume (bouton du dashboard) ; consommé par la boucle Grinder
+/// qui remet `halted=false` et persiste l'état. Dashboard accessible uniquement
+/// via Tailscale (doctrine infra) — pas d'auth supplémentaire.
+pub type ResumeFlag = Arc<std::sync::atomic::AtomicBool>;
 
 pub fn shared() -> Shared {
     Arc::new(RwLock::new(DashState::default()))
 }
 
-pub async fn serve(bind: &str, port: u16, state: Shared) -> anyhow::Result<()> {
+pub fn resume_flag() -> ResumeFlag {
+    Arc::new(std::sync::atomic::AtomicBool::new(false))
+}
+
+pub async fn serve(bind: &str, port: u16, state: Shared, resume: ResumeFlag) -> anyhow::Result<()> {
     let listener = TcpListener::bind((bind, port)).await?;
     tracing::info!(%bind, port, "dashboard en écoute");
     loop {
         let (mut sock, _) = listener.accept().await?;
         let st = state.clone();
+        let resume = resume.clone();
         tokio::spawn(async move {
             let mut buf = [0u8; 2048];
             let n = match sock.read(&mut buf).await {
@@ -83,8 +92,14 @@ pub async fn serve(bind: &str, port: u16, state: Shared) -> anyhow::Result<()> {
                 _ => return,
             };
             let req = String::from_utf8_lossy(&buf[..n]);
+            let method = req.split_whitespace().next().unwrap_or("GET");
             let path = req.split_whitespace().nth(1).unwrap_or("/");
             let (status, ctype, body) = match path {
+                "/resume" if method == "POST" => {
+                    resume.store(true, std::sync::atomic::Ordering::SeqCst);
+                    tracing::warn!("REPRISE demandée via le dashboard (POST /resume)");
+                    ("200 OK", "application/json", "{\"ok\":true}".to_string())
+                }
                 "/state" => {
                     let snap = st.read().await.clone();
                     (

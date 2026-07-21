@@ -102,12 +102,15 @@ pub struct Grinder {
     last_wall_poll_ms: i64,
     /// Dernier mur mesuré : (ts_ms, usdc, densité $/\$). Consommé par la sécurisation.
     last_wall: Option<(i64, f64, f64)>,
+    /// Levé par le bouton REDÉMARRER du dashboard (POST /resume).
+    resume_flag: crate::dashboard::ResumeFlag,
 }
 
 pub async fn run(
     cfg: Config,
     mut binance_rx: watch::Receiver<Option<BookUpdate>>,
     dash: DashShared,
+    resume_flag: crate::dashboard::ResumeFlag,
 ) -> anyhow::Result<()> {
     let live_requested = cfg.mode == "live";
     #[cfg(not(feature = "live"))]
@@ -248,6 +251,7 @@ pub async fn run(
         wallet_live,
         last_wall_poll_ms: 0,
         last_wall: None,
+        resume_flag,
         cfg,
     };
 
@@ -546,8 +550,17 @@ impl Grinder {
     /// Conditions d'entrée : fenêtre jouable, un côté ≥ ENTRY_MIN, garde verte.
     async fn try_enter(&mut self) {
         if self.st.halted {
-            self.block("HALTED après wipe — relance manuelle requise (state.halted)").await;
-            return;
+            // Bouton REDÉMARRER du dashboard : reprise sans passer par SSH.
+            if self.resume_flag.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.st.halted = false;
+                if let Err(e) = state::save(&self.cfg.state_path, &self.st) {
+                    tracing::error!(error = %e, "sauvegarde état après reprise dashboard");
+                }
+                tracing::warn!("✅ REPRISE via dashboard — halted=false, on rescanne");
+            } else {
+                self.block("HALTED après wipe — relance via le bouton du dashboard").await;
+                return;
+            }
         }
         let gs = self.guard_now();
         let now_ms = Utc::now().timestamp_millis() as u64;

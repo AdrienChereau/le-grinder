@@ -86,6 +86,18 @@
   .pill.loss   { background:rgba(255,59,78,.14);  color:var(--red); }
   .pill.panic  { background:rgba(255,194,51,.14); color:var(--amber); }
   .pill.secure { background:rgba(46,168,255,.14); color:var(--blue); }
+
+  /* Bannière disjoncteur + bouton reprise */
+  #halt_banner { display:none; background:rgba(255,59,78,.12); border:2px solid var(--red);
+    border-radius:12px; padding:14px 18px; margin-bottom:14px;
+    align-items:center; gap:16px; flex-wrap:wrap;
+    box-shadow:0 0 24px rgba(255,59,78,.25); }
+  #halt_banner .msg { font-weight:700; color:var(--red); letter-spacing:.5px; }
+  #resume_btn { background:var(--red); color:#fff; border:none; border-radius:10px;
+    padding:12px 26px; font:700 14px ui-monospace,Menlo,monospace; letter-spacing:2px;
+    cursor:pointer; box-shadow:0 0 16px rgba(255,59,78,.6); }
+  #resume_btn:hover { filter:brightness(1.15); }
+  #resume_btn:disabled { opacity:.5; cursor:wait; }
 </style>
 </head>
 <body>
@@ -97,6 +109,12 @@
   <span class="badge paper" id="mode">…</span>
   <div class="guard"><span class="dot" id="guard_dot"></span><span id="guard_txt">garde…</span></div>
 </header>
+
+<div id="halt_banner">
+  <span class="msg">⛔ BOT DISJONCTÉ — plus aucune entrée</span>
+  <span class="dim" id="halt_reason"></span>
+  <button id="resume_btn" onclick="resumeBot()">▶ REDÉMARRER</button>
+</div>
 
 <div class="hero">
   <div class="tile" id="z_tile">
@@ -198,6 +216,14 @@ const TIERS = [
 
 let lastWinKey = null;   // détection d'une nouvelle fenêtre réglée → flash
 let flashUntil = 0;      // le flash gagne/perd prime sur le filtre z pendant ~3 s
+
+async function resumeBot() {
+  const b = $('resume_btn');
+  b.disabled = true; b.textContent = '… REPRISE';
+  try { await fetch('/resume', { method: 'POST' }); } catch {}
+  // le grinder consomme le drapeau à son prochain cycle (≤ 1 s)
+  setTimeout(() => { b.disabled = false; b.textContent = '▶ REDÉMARRER'; }, 4000);
+}
 
 async function tick() {
   let s;
@@ -314,6 +340,9 @@ async function tick() {
   $('drift').textContent = s.drift.toExponential(1);
   $('sigma').textContent = s.sigma.toFixed(2);
   $('block').textContent = s.last_block_reason || '–';
+  const halted = (s.last_block_reason || '').includes('HALTED');
+  $('halt_banner').style.display = halted ? 'flex' : 'none';
+  if (halted) $('halt_reason').textContent = s.last_block_reason;
   if (s.pos_side) {
     $('pos_wrap').style.display = '';
     $('pos').textContent = `${s.pos_side.toUpperCase()} ${s.pos_shares.toFixed(0)}p @ ${s.pos_entry_price.toFixed(3)}`;
