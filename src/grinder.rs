@@ -561,6 +561,16 @@ impl Grinder {
         if remaining < self.cfg.min_remaining_s || remaining > self.cfg.max_remaining_s {
             return;
         }
+        // Pause aux ouvertures de marché (Adrien, 21 juil.) : pas de nouvelle
+        // entrée dans les fenêtres NO_TRADE_UTC (Tokyo 23:00-01:00, Europe
+        // 06:00-08:00). Une position ouverte continue de se gérer normalement.
+        let now_utc = Utc::now();
+        let minute = (now_utc.format("%H").to_string().parse::<u16>().unwrap_or(0)) * 60
+            + now_utc.format("%M").to_string().parse::<u16>().unwrap_or(0);
+        if crate::config::in_no_trade(&self.cfg.no_trade_utc, minute) {
+            self.block("pause ouverture marché (NO_TRADE_UTC)").await;
+            return;
+        }
         if !gs.is_fresh(now_ms, self.cfg.guard_max_age_ms) {
             self.block("garde Tokyo aveugle (flux Binance périmé)").await;
             return;

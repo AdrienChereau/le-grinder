@@ -87,6 +87,10 @@ pub struct Config {
     /// toute la position (le mur absolu rétrécit mécaniquement près du strike).
     /// 0 = désactivé.
     pub secure_density: f64,
+    /// Fenêtres de NON-ENTRÉE en UTC (minutes depuis minuit, bornes [début, fin),
+    /// peut envelopper minuit). Parsé depuis NO_TRADE_UTC="23:00-01:00,06:00-08:00".
+    /// Une position déjà ouverte se gère normalement — seules les ENTRÉES sont bloquées.
+    pub no_trade_utc: Vec<(u16, u16)>,
     /// Adresse UDP d'écoute du flux radar Tokyo (WireTick). None = garde locale.
     pub signal_listen: Option<String>,
     /// Âge max du tick distant avant repli sur la garde locale (ms).
@@ -114,6 +118,31 @@ fn i(key: &str, default: i64) -> i64 {
 }
 fn s(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+/// "23:00-01:00,06:00-08:00" → [(1380, 60), (360, 480)]. Les plages invalides
+/// sont ignorées silencieusement (un typo ne doit pas empêcher le boot).
+fn parse_no_trade(v: &str) -> Vec<(u16, u16)> {
+    v.split(',')
+        .filter_map(|r| {
+            let (a, b) = r.trim().split_once('-')?;
+            let m = |t: &str| -> Option<u16> {
+                let (h, mn) = t.trim().split_once(':')?;
+                let h: u16 = h.parse().ok()?;
+                let mn: u16 = mn.parse().ok()?;
+                (h < 24 && mn < 60).then_some(h * 60 + mn)
+            };
+            Some((m(a)?, m(b)?))
+        })
+        .collect()
+}
+
+/// Vrai si `minute_utc` (minutes depuis minuit UTC) tombe dans une plage,
+/// y compris les plages qui enveloppent minuit (ex. 23:00-01:00).
+pub fn in_no_trade(ranges: &[(u16, u16)], minute_utc: u16) -> bool {
+    ranges.iter().any(|&(a, b)| {
+        if a <= b { minute_utc >= a && minute_utc < b } else { minute_utc >= a || minute_utc < b }
+    })
 }
 
 impl Config {
@@ -172,6 +201,7 @@ impl Config {
             secure_last_s: i("SECURE_LAST_S", 25),
             secure_min_price: f("SECURE_MIN_PRICE", 0.90),
             secure_density: f("SECURE_DENSITY", 0.0),
+            no_trade_utc: parse_no_trade(&s("NO_TRADE_UTC", "")),
             signal_listen: env::var("SIGNAL_LISTEN").ok().filter(|v| !v.trim().is_empty()),
             remote_max_age_ms: i("REMOTE_MAX_AGE_MS", 1_500) as u64,
         }
@@ -220,8 +250,28 @@ impl Config {
             secure_last_s: 25,
             secure_min_price: 0.90,
             secure_density: 0.0,
+            no_trade_utc: Vec::new(),
             signal_listen: None,
             remote_max_age_ms: 1_500,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_trade_parsing_and_wraparound() {
+        let r = parse_no_trade("23:00-01:00,06:00-08:00, garbage ,25:00-09:00");
+        assert_eq!(r, vec![(1380, 60), (360, 480)]);
+        assert!(in_no_trade(&r, 1380)); // 23:00
+        assert!(in_no_trade(&r, 0));    // 00:00 (enveloppe minuit)
+        assert!(in_no_trade(&r, 59));   // 00:59
+        assert!(!in_no_trade(&r, 60));  // 01:00 — borne exclue
+        assert!(in_no_trade(&r, 360));  // 06:00
+        assert!(!in_no_trade(&r, 480)); // 08:00
+        assert!(!in_no_trade(&r, 720)); // midi
+        assert!(!in_no_trade(&[], 0));
     }
 }
