@@ -75,7 +75,11 @@ impl LiveExec {
     /// Vente catastrophe : liquider `shares_hint` parts (le solde on-chain réel
     /// fait autorité s'il est lisible). FAK plancher 0.01 → prend tout le book.
     /// Ne JAMAIS abandonner sur balance 0 : refresh + retry avant de conclure.
-    pub async fn sell_all(&self, token_id: &str, shares_hint: f64) -> anyhow::Result<Fill> {
+    /// `floor` = prix limite du FAK : 0.01 pour une vente catastrophe (on prend
+    /// tout ce qu'il y a), SECURE_MIN_PRICE pour une sécurisation (leçon du
+    /// 21 juil. 02:14 : bid affiché 0.99, carnet évaporé, fill moyen 0.24 —
+    /// le plancher doit être IMPOSÉ à l'exécution, pas seulement vérifié avant).
+    pub async fn sell_all(&self, token_id: &str, shares_hint: f64, floor: f64) -> anyhow::Result<Fill> {
         let mut truth = shares_hint;
         for attempt in 0..2 {
             match auth::get_conditional_balance(&self.creds, token_id).await {
@@ -105,7 +109,7 @@ impl LiveExec {
                 self.armed,
                 &self.creds,
                 token_id,
-                FakArgs { price: 0.01, size: remaining, is_sell: true },
+                FakArgs { price: floor.max(0.01), size: remaining, is_sell: true },
             )
             .await?;
             match res {

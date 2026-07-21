@@ -477,7 +477,9 @@ impl Grinder {
                                     remaining,
                                     "🛡️ SÉCURISATION fin de fenêtre : mur fragile, on encaisse"
                                 );
-                                let fill = self.exec_sell(&pos.token_id, pos.shares).await;
+                                let fill = self
+                                    .exec_sell(&pos.token_id, pos.shares, self.cfg.secure_min_price)
+                                    .await;
                                 if fill.shares > 0.0 {
                                     let proceeds =
                                         (fill.notional - fill.fees).max(0.0) + pos.cash_left;
@@ -720,11 +722,13 @@ impl Grinder {
         Some(paper::sweep_buy(book, self.st.stack, self.cfg.entry_max, self.cfg.taker_fee_rate))
     }
 
-    /// Vente catastrophe : FAK plancher 0.01 en live, sweep+haircut en paper.
-    async fn exec_sell(&self, token: &str, shares: f64) -> Fill {
+    /// Vente : FAK avec prix plancher (0.01 = catastrophe, SECURE_MIN_PRICE =
+    /// sécurisation) en live, sweep+haircut en paper. En dessous du plancher,
+    /// rien ne part — la position reste ouverte.
+    async fn exec_sell(&self, token: &str, shares: f64, floor: f64) -> Fill {
         #[cfg(feature = "live")]
         if let Some(l) = &self.live {
-            return match l.sell_all(token, shares).await {
+            return match l.sell_all(token, shares, floor).await {
                 Ok(f) => f,
                 Err(e) => {
                     tracing::error!(error = %e, "SELL live échoué — résidu à la résolution");
@@ -733,7 +737,13 @@ impl Grinder {
             };
         }
         let book = self.best_book(token).await.unwrap_or_default();
-        paper::sweep_sell_panic(&book, shares, self.cfg.panic_haircut, self.cfg.taker_fee_rate)
+        let fill = paper::sweep_sell_panic(&book, shares, self.cfg.panic_haircut, self.cfg.taker_fee_rate);
+        // Fidélité paper au plancher live : un fill moyen sous le plancher n'aurait
+        // pas existé (FAK limite) → aucun fill, position conservée.
+        if floor > 0.01 && fill.shares > 0.0 && fill.avg_price < floor {
+            return Fill::default();
+        }
+        fill
     }
 
     /// Vente catastrophe : balayage des bids avec haircut, le reste part à zéro.
@@ -741,7 +751,7 @@ impl Grinder {
     /// carnet vide, ordre refusé) : la position reste OUVERTE — inscrire un wipe
     /// serait fictif (leçon du 18 juil. 22:49 : halt fantôme, la fenêtre a gagné).
     async fn panic_exit(&mut self, pos: &Position, reason: &str, z: f64, gs: GuardState) -> bool {
-        let fill = self.exec_sell(&pos.token_id, pos.shares).await;
+        let fill = self.exec_sell(&pos.token_id, pos.shares, 0.01).await;
         if fill.shares <= 0.0 && pos.shares > 0.0 {
             tracing::warn!(reason, "vente catastrophe SANS AUCUN fill — position conservée, retry au prochain tick");
             return false;
