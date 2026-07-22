@@ -49,7 +49,7 @@ impl LiveExec {
             self.armed,
             &self.creds,
             token_id,
-            FakArgs { price: price_cap, size, is_sell: false },
+            FakArgs { price: price_cap, size, is_sell: false, all_or_none: false },
         )
         .await?;
         let fill = match res {
@@ -79,7 +79,13 @@ impl LiveExec {
     /// tout ce qu'il y a), SECURE_MIN_PRICE pour une sécurisation (leçon du
     /// 21 juil. 02:14 : bid affiché 0.99, carnet évaporé, fill moyen 0.24 —
     /// le plancher doit être IMPOSÉ à l'exécution, pas seulement vérifié avant).
-    pub async fn sell_all(&self, token_id: &str, shares_hint: f64, floor: f64) -> anyhow::Result<Fill> {
+    pub async fn sell_all(
+        &self,
+        token_id: &str,
+        shares_hint: f64,
+        floor: f64,
+        all_or_none: bool,
+    ) -> anyhow::Result<Fill> {
         let mut truth = shares_hint;
         for attempt in 0..2 {
             match auth::get_conditional_balance(&self.creds, token_id).await {
@@ -109,7 +115,7 @@ impl LiveExec {
                 self.armed,
                 &self.creds,
                 token_id,
-                FakArgs { price: floor.max(0.01), size: remaining, is_sell: true },
+                FakArgs { price: floor.max(0.01), size: remaining, is_sell: true, all_or_none },
             )
             .await?;
             match res {

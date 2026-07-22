@@ -87,6 +87,19 @@ pub struct Config {
     /// toute la position (le mur absolu rétrécit mécaniquement près du strike).
     /// 0 = désactivé.
     pub secure_density: f64,
+    /// Règle anti-capitulation (ingé + 21 juil.) pour z_floor/dist_floor
+    /// UNIQUEMENT : si le sweep complet du carnet récupère encore ≥ cette
+    /// fraction du coût ET que le drift signé n'est pas franchement adverse,
+    /// on TIENT au lieu de vendre. 0 = désactivée. radar_kill/guard_stale
+    /// restent des sorties dures.
+    pub recovery_hold: f64,
+    /// Drift signé (drift × direction) toléré par la règle ci-dessus :
+    /// on tient tant que signed_drift ≥ −recovery_drift.
+    pub recovery_drift: f64,
+    /// Plafond ABSOLU d'engagement par fenêtre en $ (sizing, ingé pt 7) :
+    /// l'excédent du stack reste en cash_left, intouchable par un wipe.
+    /// 0 = désactivé.
+    pub max_stake_usd: f64,
     /// Fenêtres de NON-ENTRÉE en UTC (minutes depuis minuit, bornes [début, fin),
     /// peut envelopper minuit). Parsé depuis NO_TRADE_UTC="23:00-01:00,06:00-08:00".
     /// Une position déjà ouverte se gère normalement — seules les ENTRÉES sont bloquées.
@@ -201,6 +214,9 @@ impl Config {
             secure_last_s: i("SECURE_LAST_S", 25),
             secure_min_price: f("SECURE_MIN_PRICE", 0.90),
             secure_density: f("SECURE_DENSITY", 0.0),
+            recovery_hold: f("RECOVERY_HOLD", 0.60),
+            recovery_drift: f("RECOVERY_DRIFT", 1e-5),
+            max_stake_usd: f("MAX_STAKE_USD", 0.0),
             no_trade_utc: parse_no_trade(&s("NO_TRADE_UTC", "")),
             signal_listen: env::var("SIGNAL_LISTEN").ok().filter(|v| !v.trim().is_empty()),
             remote_max_age_ms: i("REMOTE_MAX_AGE_MS", 1_500) as u64,
@@ -250,6 +266,9 @@ impl Config {
             secure_last_s: 25,
             secure_min_price: 0.90,
             secure_density: 0.0,
+            recovery_hold: 0.60,
+            recovery_drift: 1e-5,
+            max_stake_usd: 0.0,
             no_trade_utc: Vec::new(),
             signal_listen: None,
             remote_max_age_ms: 1_500,

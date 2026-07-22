@@ -273,7 +273,7 @@ pub async fn run(
             changed = remote_rx.changed() => {
                 // Tick radar Tokyo (10 Hz) : même chemin chaud que Binance local.
                 if changed.is_ok() {
-                    g.record_tick();
+                    g.record_tick().await;
                     let gs = g.guard_now();
                     g.check_exits(gs).await;
                 }
@@ -289,8 +289,26 @@ impl Grinder {
     /// Enregistre le tick radar courant si une position est ouverte — dataset
     /// du futur classifieur mèche vs crash (OFI/impulse au moment critique).
     /// Volume : ~10 Hz × temps en position ≈ 20-30 Mo/jour, en position SEULEMENT.
-    fn record_tick(&mut self) {
+    async fn record_tick(&mut self) {
         let Phase::InPosition(pos) = &self.phase else { return };
+        let pos = pos.clone();
+        // Contexte EFFECTIF (lacune pointée par l'ingé le 21 juil. : les ticks
+        // loggaient le sigma distant 0.8, pas le sigma local/z réellement
+        // utilisés, ni le carnet Polymarket — backtests irreconstructibles).
+        let gs = self.guard_now();
+        let remaining = ((pos.end_ms - chrono::Utc::now().timestamp_millis()) as f64 / 1000.0).max(0.0);
+        let z_eff = gs.margin_z(pos.strike, pos.dir(), remaining);
+        let dist = (gs.spot - pos.strike) * pos.dir();
+        let (bid, vwap, rec) = match self.best_book(&pos.token_id).await {
+            Some(book) => {
+                let sweep = paper::sweep_sell_panic(&book, pos.shares, 1.0, self.cfg.taker_fee_rate);
+                let rec = if pos.cost > 0.0 {
+                    ((sweep.notional - sweep.fees).max(0.0) + pos.cash_left) / pos.cost
+                } else { 0.0 };
+                (book.best_bid().unwrap_or(0.0), sweep.avg_price, rec)
+            }
+            None => (0.0, 0.0, 0.0),
+        };
         let Some(r) = &self.remote else { return };
         let Ok(t) = r.read() else { return };
         if self.tick_file.is_none() {
@@ -304,9 +322,10 @@ impl Grinder {
         if let Some(f) = &mut self.tick_file {
             use std::io::Write as _;
             let line = format!(
-                "{{\"t\":{},\"w\":{},\"side\":\"{}\",\"spot\":{:.2},\"sig\":{:.4},\"dr\":{:.3e},\"ofi\":{:.4},\"obi\":{:.4},\"vel\":{:.2},\"imp\":{:.3e},\"kill\":{}}}\n",
+                "{{\"t\":{},\"w\":{},\"side\":\"{}\",\"spot\":{:.2},\"sig\":{:.4},\"dr\":{:.3e},\"ofi\":{:.4},\"obi\":{:.4},\"vel\":{:.2},\"imp\":{:.3e},\"kill\":{},\"sig_loc\":{:.4},\"z\":{:.3},\"dist\":{:.2},\"bid\":{:.3},\"vwap\":{:.3},\"rec\":{:.3}}}\n",
                 t.ts_ms_local, pos.window_ts, pos.side_str(), t.spot, t.sigma, t.drift,
-                t.ofi, t.obi, t.velocity, t.impulse, t.ts_ms_local < t.kill_until_ms
+                t.ofi, t.obi, t.velocity, t.impulse, t.ts_ms_local < t.kill_until_ms,
+                gs.sigma, z_eff, dist, bid, vwap, rec
             );
             let _ = f.write_all(line.as_bytes());
         }
@@ -482,7 +501,10 @@ impl Grinder {
                                     "🛡️ SÉCURISATION fin de fenêtre : mur fragile, on encaisse"
                                 );
                                 let fill = self
-                                    .exec_sell(&pos.token_id, pos.shares, self.cfg.secure_min_price)
+                                    .exec_sell(
+                                        &pos.token_id, pos.shares,
+                                        self.cfg.secure_min_price, true, // FOK : tout ou rien
+                                    )
                                     .await;
                                 if fill.shares > 0.0 {
                                     let proceeds =
@@ -713,9 +735,44 @@ impl Grinder {
                 return;
             }
         }
+        // Règle anti-capitulation (ingé, validée 342 fenêtres — canari live) :
+        // z_floor/dist_floor SEULEMENT. Si le sweep complet du carnet récupère
+        // encore ≥ RECOVERY_HOLD du coût et que le drift signé n'est pas
+        // franchement adverse, on TIENT — vendre transformerait une oscillation
+        // en perte certaine. radar_kill et guard_stale restent des sorties dures.
+        if self.cfg.recovery_hold > 0.0 && matches!(reason, "z_floor" | "dist_floor") {
+            if let Some(book) = self.best_book(&pos.token_id).await {
+                let sweep = paper::sweep_sell_panic(&book, pos.shares, 1.0, self.cfg.taker_fee_rate);
+                let recovery = if pos.cost > 0.0 {
+                    ((sweep.notional - sweep.fees).max(0.0) + pos.cash_left) / pos.cost
+                } else {
+                    0.0
+                };
+                let signed_drift = gs.drift * pos.dir();
+                if recovery >= self.cfg.recovery_hold && signed_drift >= -self.cfg.recovery_drift {
+                    tracing::warn!(
+                        reason, recovery, signed_drift, z,
+                        vwap = sweep.avg_price,
+                        "🫸 ANTI-CAPITULATION : recovery et drift OK — on TIENT"
+                    );
+                    return;
+                }
+                tracing::warn!(reason, recovery, signed_drift, "anti-capitulation NON applicable → vente");
+            }
+        }
         tracing::warn!(reason, z, drift = gs.drift, "VENTE CATASTROPHE");
         if self.panic_exit(&pos, reason, z, gs).await {
             self.phase = Phase::Scanning;
+        }
+    }
+
+    /// $ réellement engagés sur une fenêtre : stack plafonné par MAX_STAKE_USD
+    /// (sizing, ingé pt 7). L'excédent reste en cash_left, hors d'atteinte d'un wipe.
+    fn engage(&self) -> f64 {
+        if self.cfg.max_stake_usd > 0.0 {
+            self.st.stack.min(self.cfg.max_stake_usd)
+        } else {
+            self.st.stack
         }
     }
 
@@ -723,7 +780,7 @@ impl Grinder {
     async fn exec_buy(&self, book: &PolyBook, token: &str) -> Option<Fill> {
         #[cfg(feature = "live")]
         if let Some(l) = &self.live {
-            return match l.buy_all(token, self.st.stack, self.cfg.entry_max).await {
+            return match l.buy_all(token, self.engage(), self.cfg.entry_max).await {
                 Ok(f) => Some(f),
                 Err(e) => {
                     tracing::error!(error = %e, "BUY live échoué");
@@ -732,16 +789,16 @@ impl Grinder {
             };
         }
         let _ = token;
-        Some(paper::sweep_buy(book, self.st.stack, self.cfg.entry_max, self.cfg.taker_fee_rate))
+        Some(paper::sweep_buy(book, self.engage(), self.cfg.entry_max, self.cfg.taker_fee_rate))
     }
 
     /// Vente : FAK avec prix plancher (0.01 = catastrophe, SECURE_MIN_PRICE =
     /// sécurisation) en live, sweep+haircut en paper. En dessous du plancher,
     /// rien ne part — la position reste ouverte.
-    async fn exec_sell(&self, token: &str, shares: f64, floor: f64) -> Fill {
+    async fn exec_sell(&self, token: &str, shares: f64, floor: f64, all_or_none: bool) -> Fill {
         #[cfg(feature = "live")]
         if let Some(l) = &self.live {
-            return match l.sell_all(token, shares, floor).await {
+            return match l.sell_all(token, shares, floor, all_or_none).await {
                 Ok(f) => f,
                 Err(e) => {
                     tracing::error!(error = %e, "SELL live échoué — résidu à la résolution");
@@ -751,9 +808,12 @@ impl Grinder {
         }
         let book = self.best_book(token).await.unwrap_or_default();
         let fill = paper::sweep_sell_panic(&book, shares, self.cfg.panic_haircut, self.cfg.taker_fee_rate);
-        // Fidélité paper au plancher live : un fill moyen sous le plancher n'aurait
-        // pas existé (FAK limite) → aucun fill, position conservée.
+        // Fidélité paper au FAK limite / FOK live : fill moyen sous le plancher
+        // ou fill partiel en tout-ou-rien → rien ne part, position conservée.
         if floor > 0.01 && fill.shares > 0.0 && fill.avg_price < floor {
+            return Fill::default();
+        }
+        if all_or_none && fill.shares + 1e-9 < shares {
             return Fill::default();
         }
         fill
@@ -764,7 +824,7 @@ impl Grinder {
     /// carnet vide, ordre refusé) : la position reste OUVERTE — inscrire un wipe
     /// serait fictif (leçon du 18 juil. 22:49 : halt fantôme, la fenêtre a gagné).
     async fn panic_exit(&mut self, pos: &Position, reason: &str, z: f64, gs: GuardState) -> bool {
-        let fill = self.exec_sell(&pos.token_id, pos.shares, 0.01).await;
+        let fill = self.exec_sell(&pos.token_id, pos.shares, 0.01, false).await;
         if fill.shares <= 0.0 && pos.shares > 0.0 {
             tracing::warn!(reason, "vente catastrophe SANS AUCUN fill — position conservée, retry au prochain tick");
             return false;

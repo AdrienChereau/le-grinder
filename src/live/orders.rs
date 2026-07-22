@@ -22,6 +22,8 @@ pub struct FakArgs {
     pub price: f64,    // prix limite ∈ (0,1) — cap d'achat ou plancher de vente
     pub size: f64,     // parts (arrondi 2 décimales — LOT_SIZE_SCALE)
     pub is_sell: bool, // false = BUY
+    /// true = FOK (tout ou rien — sécurisation) ; false = FAK.
+    pub all_or_none: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -81,6 +83,8 @@ pub async fn place_fak(
     let price = decimal_from_f64(args.price, 2, "price")?;
     let size = decimal_from_f64(args.size, 2, "size")?;
     let side = if args.is_sell { Side::Sell } else { Side::Buy };
+    // FOK = tout ou rien (sécurisation) ; FAK = fill partiel accepté (panic/achat).
+    let otype = if args.all_or_none { OrderType::FOK } else { OrderType::FAK };
 
     let lock = CACHED_AUTH_CLIENT
         .get()
@@ -93,7 +97,7 @@ pub async fn place_fak(
         .side(side)
         .price(price)
         .size(size)
-        .order_type(OrderType::FAK)
+        .order_type(otype)
         .build()
         .await
         .map_err(|e| anyhow::anyhow!("build order: {e}"))?;
