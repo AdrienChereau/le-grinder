@@ -718,6 +718,23 @@ impl Grinder {
         if pos.ride {
             return; // point de non-retour déjà franchi : on tient jusqu'au bout
         }
+        // Zone de mèche : loin de la clôture, une alerte z/dist/drift est une
+        // mèche 83-100 % du temps et le carnet PM est retiré (bait des MMs) —
+        // on TIENT. La vente ne s'exécute que dans les dernières secondes,
+        // où une traversée colle vraiment. radar_kill/guard_stale non concernés.
+        if self.cfg.panic_only_last_s > 0
+            && matches!(reason, "z_floor" | "dist_floor" | "drift_against")
+        {
+            let remaining_s = (pos.end_ms - Utc::now().timestamp_millis()) / 1000;
+            if remaining_s > self.cfg.panic_only_last_s {
+                tracing::warn!(
+                    reason, remaining_s, z,
+                    "🪝 zone de mèche (> {} s restantes) — alerte IGNORÉE, on tient",
+                    self.cfg.panic_only_last_s
+                );
+                return;
+            }
+        }
 
         let pos = pos.clone();
         // Point de non-retour : sous PANIC_FLOOR, vendre ne récupère que des

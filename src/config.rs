@@ -87,6 +87,13 @@ pub struct Config {
     /// toute la position (le mur absolu rétrécit mécaniquement près du strike).
     /// 0 = désactivé.
     pub secure_density: f64,
+    /// Zone de mèche (Adrien, 22 juil. — « les MMs retirent leurs bids et on se
+    /// fait bait ») : les sorties z_floor/dist_floor/drift_against ne VENDENT
+    /// que dans les N dernières secondes de la fenêtre. Avant, une alerte est
+    /// une mèche 83-100 % du temps (backtest 56 panics : tenir >30 s = +40 $,
+    /// vendre <30 s = +49 $ sauvés) → on tient. radar_kill reste toujours actif.
+    /// 0 = sorties actives tout du long (ancien comportement).
+    pub panic_only_last_s: i64,
     /// Règle anti-capitulation (ingé + 21 juil.) pour z_floor/dist_floor
     /// UNIQUEMENT : si le sweep complet du carnet récupère encore ≥ cette
     /// fraction du coût ET que le drift signé n'est pas franchement adverse,
@@ -214,6 +221,7 @@ impl Config {
             secure_last_s: i("SECURE_LAST_S", 25),
             secure_min_price: f("SECURE_MIN_PRICE", 0.90),
             secure_density: f("SECURE_DENSITY", 0.0),
+            panic_only_last_s: i("PANIC_ONLY_LAST_S", 30),
             recovery_hold: f("RECOVERY_HOLD", 0.60),
             recovery_drift: f("RECOVERY_DRIFT", 1e-5),
             max_stake_usd: f("MAX_STAKE_USD", 0.0),
@@ -266,6 +274,7 @@ impl Config {
             secure_last_s: 25,
             secure_min_price: 0.90,
             secure_density: 0.0,
+            panic_only_last_s: 30,
             recovery_hold: 0.60,
             recovery_drift: 1e-5,
             max_stake_usd: 0.0,
